@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <array>
+        <dict>
+            <key>DNSSettings</key>
+            <dict>
+                <key>DNSProtocol</key>
+                <string>HTTPS</string>
+                <key>ServerURL</key>
+                <string>https://dns.adguard-dns.com/dns-query</string>
+                <key>ServerAddresses</key>
+                <array>
+                    <string>94.140.14.14</string>
+                    <string>94.140.15.15</string>
+                    <string>2a10:50c0::ad1:ff</string>
+                    <string>2a10:50c0::ad2:ff</string>
+                </array>
+            </dict>
+            <key>PayloadDescription</key>
+            <string>Blocks ads and trackers in all apps and Safari using encrypted AdGuard DNS.</string>
+            <key>PayloadDisplayName</key>
+            <string>AdShield (AdGuard DNS)</string>
+            <key>PayloadIdentifier</key>
+            <string>com.ahdaaa.adshield.dns</string>
+            <key>PayloadType</key>
+            <string>com.apple.dnsSettings.managed</string>
+            <key>PayloadUUID</key>
+            <string>c6224f99-6ad1-4a2a-85d5-6a4e6c747a2f</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+        </dict>
+    </array>
+    <key>PayloadDescription</key>
+    <string>Blocks ads and trackers on your iPhone or iPad. Remove it anytime in Settings → General → VPN &amp; Device Management.</string>
+    <key>PayloadDisplayName</key>
+    <string>AdShield Ad Blocker</string>
+    <key>PayloadIdentifier</key>
+    <string>com.ahdaaa.adshield</string>
+    <key>PayloadRemovalDisallowed</key>
+    <false/>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>6b8a22e0-9ee4-4d6c-bd95-8be57c4a0b76</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+</dict>
+</plist>
