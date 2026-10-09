@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.ahdaaa.adshield'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.ahdaaa.adshield'
+        minSdk 26
+        targetSdk 35
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger())
+        versionName "1.0.${System.getenv('GITHUB_RUN_NUMBER') ?: '0'}"
+    }
+
+    signingConfigs {
+        // Set these (e.g. as GitHub Actions secrets) to sign with your own key so
+        // future versions install as updates. Otherwise the debug key is used.
+        if (System.getenv('SIGNING_STORE_FILE')) {
+            release {
+                storeFile file(System.getenv('SIGNING_STORE_FILE'))
+                storePassword System.getenv('SIGNING_STORE_PASSWORD')
+                keyAlias System.getenv('SIGNING_KEY_ALIAS')
+                keyPassword System.getenv('SIGNING_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig System.getenv('SIGNING_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}

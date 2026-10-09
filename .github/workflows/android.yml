@@ -1,0 +1,63 @@
+name: Build APK
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Use your own signing key (optional)
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        if: env.SIGNING_KEYSTORE_BASE64 != ''
+        run: |
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "SIGNING_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon testReleaseUnitTest
+
+      - name: Build APK
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk AdShield.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AdShield-apk
+          path: AdShield.apk
+
+      # On the main branch, publish a release so the APK has a permanent,
+      # phone-friendly download link (…/releases/latest/download/AdShield.apk).
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: AdShield 1.0.${{ github.run_number }}
+          make_latest: true
+          files: |
+            AdShield.apk
+            ios/AdShield-iPhone.mobileconfig
+          body: |
+            **Android:** download `AdShield.apk`, open it, allow "install unknown apps", then open AdShield and tap the big button.
+            **iPhone/iPad:** open `AdShield-iPhone.mobileconfig` in Safari, then Settings → Profile Downloaded → Install.
