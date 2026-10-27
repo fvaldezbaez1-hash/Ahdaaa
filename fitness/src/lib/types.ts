@@ -220,7 +220,7 @@ export interface CheckIn {
   seen?: boolean
 }
 
-export type GoalType = 'lose' | 'maintain' | 'gain'
+export type GoalType = 'lose' | 'shred' | 'maintain' | 'gain'
 
 export interface Profile {
   sex: 'male' | 'female'

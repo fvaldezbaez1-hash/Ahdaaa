@@ -206,6 +206,38 @@ function sections(lb: boolean): Section[] {
       ),
     },
     {
+      id: 'shred',
+      title: 'Getting shredded without losing muscle',
+      go: { label: 'Set my goal', to: '/settings/goals' },
+      body: (
+        <>
+          <p>
+            Choose <b>Get shredded</b> in Goals &amp; targets. Then:
+          </p>
+          <ol>
+            <li>
+              <b>Don’t rush it.</b> About 0.5% of your body weight a week keeps the most muscle. As you get leaner, slow down further.
+            </li>
+            <li>
+              <b>Hit your protein every day.</b> Forge sets it to about {lb ? '1 g per lb' : '2.2 g per kg'} of body weight. Spread it over 3–5 meals.
+            </li>
+            <li>
+              <b>Keep lifting heavy.</b> Keep the same weights and rep ranges as before. Lifting is the signal that keeps your muscle; switching to light “toning” work isn’t.
+            </li>
+            <li>
+              <b>Watch the Strength check</b> on the Today screen. Holding your strength means you’re keeping muscle. If your lifts drop more than about 5%, slow the cut down.
+            </li>
+            <li>
+              <b>Sleep 7–9 hours</b> and walk every day. Easy steps burn fat without eating into your recovery.
+            </li>
+            <li>
+              <b>Use photos and your waist measurement.</b> When you’re getting lean the scale moves slowly, but the mirror and tape show it.
+            </li>
+          </ol>
+        </>
+      ),
+    },
+    {
       id: 'progress',
       title: 'Tracking your progress',
       go: { label: 'Go to progress', to: '/progress' },

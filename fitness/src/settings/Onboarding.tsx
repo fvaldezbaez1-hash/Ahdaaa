@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { targetsFor } from '../lib/coach'
 import { today } from '../lib/dates'
 import { db } from '../lib/db'
-import { formulaTdee } from '../lib/energy'
+import { formulaTdee, SHRED_PROTEIN_PER_KG } from '../lib/energy'
 import { defaultSettings, updateSettings } from '../lib/settings'
 import type { Settings } from '../lib/types'
 import { fmtKcal, kgTo, toKg } from '../lib/units'
@@ -132,7 +132,7 @@ export function Onboarding() {
         {step === 3 && (
           <div className="stack">
             <h1>Your goal</h1>
-            <GoalFields goal={s.goal} onChange={(goal) => set({ goal })} weightKg={kg} unit={s.weightUnit} />
+            <GoalFields goal={s.goal} onChange={(goal) => set(goal.type === 'shred' ? { goal, proteinPerKg: Math.max(s.proteinPerKg, SHRED_PROTEIN_PER_KG) } : { goal })} weightKg={kg} unit={s.weightUnit} />
           </div>
         )}
 

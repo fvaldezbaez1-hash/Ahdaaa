@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { refreshTargets } from '../lib/coach'
+import { SHRED_PROTEIN_PER_KG } from '../lib/energy'
 import { today } from '../lib/dates'
 import { updateSettings } from '../lib/settings'
 import { trendOn } from '../lib/trend'
@@ -45,7 +46,15 @@ export function GoalsScreen() {
       <div className="stack loose">
         <section className="stack">
           <h2>Goal</h2>
-          <GoalFields goal={s.goal} onChange={(goal) => set({ goal })} weightKg={kg} unit={st.weightUnit} />
+          <GoalFields
+            goal={s.goal}
+            onChange={(goal) =>
+              // Get shredded needs high protein; show the number it will really use.
+              set(goal.type === 'shred' ? { goal, proteinPerKg: Math.max(s.proteinPerKg, SHRED_PROTEIN_PER_KG) } : { goal })
+            }
+            weightKg={kg}
+            unit={st.weightUnit}
+          />
         </section>
 
         <section className="stack">
@@ -67,7 +76,13 @@ export function GoalsScreen() {
               <div className="grid-2">
                 <Field
                   label={`Protein per ${lb ? 'lb' : 'kg'} of body weight`}
-                  hint={lb ? '0.7–1 g/lb is ideal for building or keeping muscle.' : '1.6–2.2 g/kg is ideal for building or keeping muscle.'}
+                  hint={
+                    s.goal.type === 'shred'
+                      ? `Get shredded uses at least ${lb ? '1 g/lb' : '2.2 g/kg'} to protect your muscle.`
+                      : lb
+                        ? '0.7–1 g/lb is ideal for building or keeping muscle.'
+                        : '1.6–2.2 g/kg is ideal for building or keeping muscle.'
+                  }
                 >
                   <div className="input-unit">
                     <NumField

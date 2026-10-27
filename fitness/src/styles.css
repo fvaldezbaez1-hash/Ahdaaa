@@ -1688,3 +1688,13 @@ select.input {
     animation: none;
   }
 }
+
+.badge.good {
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good-text);
+}
+
+.badge.bad {
+  background: color-mix(in srgb, var(--critical) 16%, transparent);
+  color: var(--critical-text);
+}

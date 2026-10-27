@@ -150,3 +150,51 @@ export function repMaxes(sets: WSet[]): { reps: number; kg: number }[] {
   }
   return [...best.entries()].sort((a, b) => a[0] - b[0]).map(([reps, kg]) => ({ reps, kg }))
 }
+
+export interface StrengthTrend {
+  /** Lifts compared (done in both windows). */
+  lifts: number
+  /** Average change in best estimated 1RM, in percent. */
+  changePct: number
+  /** Exercise ids that dropped more than 5%. */
+  down: string[]
+}
+
+/**
+ * Strength check for a cut: best estimated 1RM per weighted lift over the last
+ * two weeks versus the four weeks before. Holding strength while losing weight
+ * is the practical sign that muscle is being kept; a clear drop is an early
+ * warning to slow down. Needs at least two lifts done in both windows.
+ */
+export function strengthTrend(workouts: Workout[], exercises: Map<string, Exercise>, now = Date.now()): StrengthTrend | undefined {
+  const DAY = 86_400_000
+  const recentFrom = now - 14 * DAY
+  const baseFrom = now - 42 * DAY
+  const recent = new Map<string, number>()
+  const base = new Map<string, number>()
+  for (const w of workouts) {
+    if (w.start < baseFrom || w.start > now) continue
+    const into = w.start >= recentFrom ? recent : base
+    for (const we of w.exercises) {
+      const kind = exercises.get(we.exerciseId)?.kind
+      if (kind !== 'weight_reps' && kind !== 'weighted_bw') continue
+      for (const s of we.sets) {
+        if (!isWorkingSet(s) || !s.reps || s.reps > 15) continue
+        const v = e1rm(s.kg ?? 0, s.reps)
+        if (v > (into.get(we.exerciseId) ?? 0)) into.set(we.exerciseId, v)
+      }
+    }
+  }
+  const changes: [string, number][] = []
+  for (const [id, b] of base) {
+    const r = recent.get(id)
+    if (r !== undefined && b > 0) changes.push([id, r / b - 1])
+  }
+  if (changes.length < 2) return undefined
+  const mean = changes.reduce((a, [, c]) => a + c, 0) / changes.length
+  return {
+    lifts: changes.length,
+    changePct: Math.round(mean * 1000) / 10,
+    down: changes.filter(([, c]) => c < -0.05).map(([id]) => id),
+  }
+}

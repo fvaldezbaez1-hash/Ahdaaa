@@ -11,6 +11,7 @@ import { BarChart, compact, HBars } from '../ui/charts'
 import { Empty, Stat } from '../ui/controls'
 import { Icon } from '../ui/Icon'
 import { fmtSet } from '../workout/format'
+import { StrengthCheck } from './StrengthCheck'
 
 const HEAT_WEEKS = 17
 
@@ -94,6 +95,8 @@ export function TrainingSection() {
         <Stat tile label="Volume (30 days)" value={fmtWeight(data.vol30, st.weightUnit)} />
         <Stat tile label="Weekly streak" value={data.streak ? `🔥 ${data.streak}` : '0'} unit={data.streak === 1 ? 'week' : 'weeks'} />
       </div>
+
+      <StrengthCheck always />
 
       <div className="card stack">
         <h3>

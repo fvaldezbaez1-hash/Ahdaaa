@@ -15,7 +15,29 @@ export const ACTIVITY_LEVELS = [
   { value: 1.725, label: 'Very active', detail: 'Hard training most days or a physical job' },
 ]
 
+export const GOAL_LABEL: Record<Goal['type'], string> = {
+  shred: 'Get shredded',
+  lose: 'Lose weight',
+  maintain: 'Maintain',
+  gain: 'Build muscle',
+}
+
+/** Goals that run a calorie deficit. */
+export const isCut = (t: Goal['type']) => t === 'lose' || t === 'shred'
+
+/**
+ * Protein floor for "Get shredded" (≈1 g per lb). Higher protein in a
+ * deficit is the best-supported way to keep muscle while losing fat.
+ */
+export const SHRED_PROTEIN_PER_KG = 2.2
+
 export const GOAL_RATES: Record<Goal['type'], { pct: number; label: string }[]> = {
+  // Slower cuts keep more muscle, especially as you get leaner.
+  shred: [
+    { pct: 0.35, label: 'Gentle' },
+    { pct: 0.5, label: 'Steady' },
+    { pct: 0.75, label: 'Faster' },
+  ],
   lose: [
     { pct: 0.25, label: 'Gentle' },
     { pct: 0.5, label: 'Moderate' },
@@ -106,7 +128,7 @@ export function goalDelta(goal: Goal, weightKg: number): number {
   if (goal.type === 'maintain') return 0
   const kgPerWeek = (weightKg * goal.ratePct) / 100
   const perDay = (kgPerWeek * KCAL_PER_KG) / 7
-  return goal.type === 'lose' ? -perDay : perDay
+  return isCut(goal.type) ? -perDay : perDay
 }
 
 export function computeTargets(args: {
@@ -123,7 +145,8 @@ export function computeTargets(args: {
   // Protein scales with body weight, capped at a BMI-27 reference weight so
   // larger bodies don't get unrealistic protein targets.
   const ref = args.heightCm ? Math.min(args.weightKg, 27 * (args.heightCm / 100) ** 2) : args.weightKg
-  const protein = Math.round(Math.min(args.proteinPerKg * ref, 300))
+  const perKg = args.goal.type === 'shred' ? Math.max(args.proteinPerKg, SHRED_PROTEIN_PER_KG) : args.proteinPerKg
+  const protein = Math.round(Math.min(perKg * ref, 300))
   let fat = Math.round(Math.max((kcal * args.fatPct) / 100 / 9, 0.5 * ref))
   if (protein * 4 + fat * 9 > kcal) fat = Math.max(0, Math.floor((kcal - protein * 4) / 9))
   const carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4))
