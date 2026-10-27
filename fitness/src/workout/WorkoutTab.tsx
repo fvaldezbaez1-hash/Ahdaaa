@@ -12,6 +12,7 @@ import { Icon } from '../ui/Icon'
 import { MenuSheet } from '../ui/Sheet'
 import { toast } from '../ui/toast'
 import { Topbar } from '../ui/Topbar'
+import { HelpButton, Tip } from '../help/Tip'
 import { useActive } from './active'
 import { PlateCalcSheet } from './PlateCalc'
 import { duplicateRoutine } from './routines'
@@ -51,8 +52,21 @@ export function WorkoutTab() {
 
   return (
     <div className="screen">
-      <Topbar title="Workout" />
+      <Topbar title="Workout" right={<HelpButton section="workout" />} />
       <div className="stack">
+        <Tip id="workout-tab" title="How workouts work" learnMore="workout">
+          <ol>
+            <li>
+              Pick a <b>routine</b> below and tap <b>Start</b>, or start an empty workout. No routines yet? Tap <b>Programs</b> for a ready-made plan.
+            </li>
+            <li>
+              Do a set, then tap <b>✓</b>. The rest timer starts by itself.
+            </li>
+            <li>
+              Tap <b>Finish</b> when you’re done. Next time, Forge shows what you lifted and what to aim for.
+            </li>
+          </ol>
+        </Tip>
         <button className="btn primary block lg" onClick={() => begin()}>
           <Icon name="plus" /> Start empty workout
         </button>

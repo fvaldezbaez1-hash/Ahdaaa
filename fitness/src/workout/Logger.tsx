@@ -17,6 +17,7 @@ import { useActive } from './active'
 import { ExercisePicker } from './ExercisePicker'
 import { fmtPrev, SET_TYPE_LABEL, SET_TYPE_SHORT } from './format'
 import { PlateCalcSheet } from './PlateCalc'
+import { Tip } from '../help/Tip'
 
 type Vals = Pick<WSet, 'kg' | 'reps' | 'seconds' | 'meters'>
 
@@ -279,6 +280,25 @@ export function LoggerScreen() {
 
         {editing && <EditTimes />}
 
+        {active.exercises.length > 0 && (
+          <Tip id="logger" title="Logging your sets" learnMore="workout">
+            <ul>
+              <li>
+                Each row is one set: <b>weight</b> and <b>reps</b>.
+              </li>
+              <li>
+                First time doing an exercise? Type the weight and reps you did. After that, Forge fills in <b>grey suggestions</b> from last time. If that’s what you did, just tap <b>✓</b>.
+              </li>
+              <li>
+                <b>✓</b> finishes the set and starts your rest timer.
+              </li>
+              <li>
+                Tap the <b>set number</b> to mark a warm-up, or <b>⋯</b> for more options.
+              </li>
+            </ul>
+          </Tip>
+        )}
+
         {active.exercises.length === 0 && (
           <div className="card empty">
             <Icon name="dumbbell" size={32} />
@@ -380,7 +400,7 @@ export function LoggerScreen() {
                         <NumField
                           className="set-input"
                           value={s.kg === undefined ? undefined : round(kgTo(s.kg, st.weightUnit), 2)}
-                          placeholder={ph.kg !== undefined ? fmtNum(round(kgTo(ph.kg, st.weightUnit), 1)) : ex.kind === 'weight_reps' ? '0' : '–'}
+                          placeholder={ph.kg !== undefined ? fmtNum(round(kgTo(ph.kg, st.weightUnit), 1)) : '–'}
                           onChange={(v) => set({ kg: v === undefined ? undefined : toKg(v, st.weightUnit) })}
                           aria-label={`Weight in ${st.weightUnit}`}
                         />
@@ -399,7 +419,13 @@ export function LoggerScreen() {
                           className="set-input"
                           dp={0}
                           value={s.reps}
-                          placeholder={ph.reps !== undefined ? String(ph.reps) : we.repMin !== undefined ? String(we.repMin) : '0'}
+                          placeholder={
+                            ph.reps !== undefined
+                              ? String(ph.reps)
+                              : we.repMin !== undefined && we.repMax !== undefined
+                                ? we.repMin === we.repMax ? String(we.repMin) : `${we.repMin}–${we.repMax}`
+                                : '–'
+                          }
                           onChange={(v) => set({ reps: v === undefined ? undefined : Math.round(v) })}
                           aria-label="Reps"
                         />

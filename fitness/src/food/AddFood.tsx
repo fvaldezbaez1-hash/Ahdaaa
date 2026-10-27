@@ -17,6 +17,7 @@ import { FoodSheet } from './FoodSheet'
 import { amountLabel } from './FoodTab'
 import { findByBarcode, logSavedMeal, mealTotals, searchLocal } from './repo'
 import { ScannerSheet } from './Scanner'
+import { Tip } from '../help/Tip'
 
 type Tab = 'recent' | 'favorites' | 'mine' | 'meals'
 
@@ -196,6 +197,22 @@ export function AddFoodScreen({ meal: mealParam, date: dateParam }: { meal?: str
           </>
         ) : (
           <>
+            <Tip id="add-food" title="Finding your food" learnMore="food">
+              <ul>
+                <li>
+                  <b>Type to search</b>. Try “chicken breast” or “banana”. For a brand, tap <b>Search Open Food Facts</b> after typing.
+                </li>
+                <li>
+                  <b>Scan</b> the barcode on a package.
+                </li>
+                <li>
+                  <b>Quick</b>: just type the calories (great for restaurants).
+                </li>
+                <li>
+                  <b>Create</b>: copy a nutrition label once and it’s saved.
+                </li>
+              </ul>
+            </Tip>
             <Segmented
               value={tab}
               onChange={setTab}

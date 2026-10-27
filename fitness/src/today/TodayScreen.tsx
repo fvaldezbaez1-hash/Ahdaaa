@@ -18,6 +18,8 @@ import { Icon } from '../ui/Icon'
 import { toast } from '../ui/toast'
 import { InstallSheet, isInstalled } from '../settings/SettingsScreen'
 import { useBeginWorkout } from '../workout/WorkoutTab'
+import { GettingStarted } from '../help/GettingStarted'
+import { HelpButton } from '../help/Tip'
 
 const DISMISS_INSTALL = 'forge:install-dismissed'
 
@@ -95,6 +97,14 @@ export function TodayScreen() {
   const spark = trend.slice(-30).map((p) => kgTo(p.trend, st.weightUnit))
   const previousCheckIn = checkIns && checkIn ? checkIns.filter((c) => c.date < checkIn.date).at(-1) : undefined
 
+  const focusWeight = () => {
+    const el = document.getElementById('today-weight')
+    if (el) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      el.focus({ preventScroll: true })
+    } else navigate('/progress?tab=body')
+  }
+
   const logWeight = async () => {
     if (!weight) return
     const kg = toKg(weight, st.weightUnit)
@@ -112,13 +122,16 @@ export function TodayScreen() {
           <h1>Today</h1>
           <div className="small muted">{fmtLongDay(t)}</div>
         </div>
+        <HelpButton />
         <button className="icon-btn" onClick={() => navigate('/settings')} aria-label="Settings">
-          <Icon name="sliders" />
+          <Icon name="gear" />
         </button>
       </header>
 
       <div className="stack">
-        {!isInstalled() && !installDismissed && (
+        <GettingStarted onLogWeight={focusWeight} />
+
+        {!isInstalled() && !installDismissed && st.checklistHidden && (
           <div className="card row" style={{ gap: 12 }}>
             <Icon name="phone" />
             <div className="grow">
@@ -149,6 +162,9 @@ export function TodayScreen() {
 
         <div className="card stack">
           <CalorieSummary totals={totals} targets={targets} />
+          <button className="btn ghost sm" style={{ padding: 0, alignSelf: 'flex-start', minHeight: 0 }} onClick={() => navigate('/help?s=targets')}>
+            <Icon name="help" size={16} /> How is my target worked out?
+          </button>
           <div className="grid-2">
             <button className="btn primary" onClick={() => navigate(`/add?date=${t}`)}>
               <Icon name="plus" size={18} /> Log food
@@ -269,6 +285,7 @@ export function TodayScreen() {
             >
               <div className="input-unit grow">
                 <NumField
+                  id="today-weight"
                   className="input"
                   dp={1}
                   value={weight}
