@@ -13,6 +13,7 @@ import { toast } from '../ui/toast'
 import { CreateFoodSheet, QuickAddSheet } from './FoodForms'
 import { FoodSheet } from './FoodSheet'
 import { CalorieSummary } from './MacroSummary'
+import { Tip } from '../help/Tip'
 import { addWater, copyDay, copyMeal, foodFromEntry, getFood, saveMeal } from './repo'
 
 export function amountLabel(e: Pick<FoodEntry, 'qty' | 'servingLabel' | 'grams' | 'unit' | 'name'>): string {
@@ -131,6 +132,17 @@ export function FoodTab({ date: dateParam }: { date?: string }) {
       </header>
 
       <div className="stack">
+        <Tip id="food-tab" title="How to log food" learnMore="food">
+          <ul>
+            <li>
+              Tap <b>+</b> next to a meal to add food: search, scan a barcode, or quick-add calories.
+            </li>
+            <li>Tap any food you’ve logged to change the amount or delete it.</li>
+            <li>
+              <b>⋯</b> next to a meal copies it from yesterday or saves it for next time.
+            </li>
+          </ul>
+        </Tip>
         <div className="card">
           <CalorieSummary totals={totals} targets={targets} />
           <button className="btn ghost sm" style={{ marginTop: 8, padding: 0 }} onClick={() => setDetails(true)}>
@@ -244,6 +256,7 @@ export function FoodTab({ date: dateParam }: { date?: string }) {
               },
             },
             ...(date !== today() ? [{ label: 'Go to today', icon: 'calendar' as const, onClick: () => go(today()) }] : []),
+            { label: 'How to log food', icon: 'help' as const, onClick: () => navigate('/help?s=food') },
           ]}
         />
       )}

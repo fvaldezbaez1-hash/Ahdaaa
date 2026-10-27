@@ -9,6 +9,7 @@ import { useSettings, useTargets } from '../state'
 import { Segmented, Toggle } from '../ui/controls'
 import { Icon } from '../ui/Icon'
 import { Sheet } from '../ui/Sheet'
+import { toast } from '../ui/toast'
 import { Topbar } from '../ui/Topbar'
 
 function Row({ label, children, onClick, hint }: { label: string; children?: ReactNode; onClick?: () => void; hint?: string }) {
@@ -86,6 +87,21 @@ export function SettingsScreen() {
     <div className="screen no-tabs">
       <Topbar title="Settings" back="/" />
       <div className="stack loose">
+        <section className="stack tight">
+          <div className="field-label">Help</div>
+          <div className="list">
+            <Row label="How to use Forge" hint="Step-by-step guide to every part of the app" onClick={() => navigate('/help')} />
+            <Row
+              label="Show tips again"
+              hint="Brings back the first-time tips and the Getting started checklist"
+              onClick={async () => {
+                await updateSettings({ tipsSeen: [], checklistHidden: false })
+                toast('Tips are back on')
+              }}
+            />
+          </div>
+        </section>
+
         <section className="stack tight">
           <div className="field-label">Goals</div>
           <div className="list">

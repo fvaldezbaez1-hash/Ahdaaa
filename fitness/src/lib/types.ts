@@ -255,4 +255,8 @@ export interface Settings {
   weeklyWorkoutGoal: number
   keepAwake: boolean
   lastBackupAt?: number
+  /** First-time tips the user has dismissed. */
+  tipsSeen?: string[]
+  /** The Today screen's "Getting started" checklist was closed. */
+  checklistHidden?: boolean
 }

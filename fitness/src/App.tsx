@@ -9,6 +9,7 @@ import { DataScreen } from './settings/DataScreen'
 import { GoalsScreen } from './settings/GoalsScreen'
 import { ProgressTab } from './progress/ProgressTab'
 import { TodayScreen } from './today/TodayScreen'
+import { GuideScreen } from './help/GuideScreen'
 import { useSettings } from './state'
 import { Icon, type IconName } from './ui/Icon'
 import { useNow } from './ui/hooks'
@@ -130,6 +131,10 @@ export function App() {
       break
     case 'exercises':
       screen = <ExercisesScreen />
+      tabs = false
+      break
+    case 'help':
+      screen = <GuideScreen open={query.get('s') ?? undefined} />
       tabs = false
       break
     case 'settings':

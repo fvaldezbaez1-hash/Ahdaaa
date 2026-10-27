@@ -10,6 +10,7 @@ import { MACROS } from '../food/MacroSummary'
 import { Field, Segmented, UnitInput } from '../ui/controls'
 import { Icon } from '../ui/Icon'
 import { GoalFields, ProfileFields } from './ProfileFields'
+import { InstallSheet, isInstalled } from './SettingsScreen'
 
 const STEPS = 4
 
@@ -17,6 +18,7 @@ export function Onboarding() {
   const [step, setStep] = useState(0)
   const [s, setS] = useState<Settings>(defaultSettings)
   const [weightKg, setWeightKg] = useState<number | undefined>(undefined)
+  const [install, setInstall] = useState(false)
   const set = (patch: Partial<Settings>) => setS((cur) => ({ ...cur, ...patch }))
 
   const kg = weightKg ?? 75
@@ -72,6 +74,20 @@ export function Onboarding() {
                 </div>
               ))}
             </div>
+            {!isInstalled() && (
+              <div className="card tip-card stack tight">
+                <div className="row">
+                  <Icon name="bulb" />
+                  <h3 className="grow">Tip: install it first</h3>
+                </div>
+                <p className="tip-body">
+                  Add Forge to your home screen <b>before</b> setting it up, then open it from the new icon. On iPhone the home-screen app keeps its own data, separate from Safari.
+                </p>
+                <button className="btn soft sm" style={{ alignSelf: 'flex-start' }} onClick={() => setInstall(true)}>
+                  Show me how
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -154,6 +170,9 @@ export function Onboarding() {
               </p>
             </div>
             {!weightKg && <p className="small muted">You skipped your weight, so these use 75 kg as a placeholder. Log your weight on the Today screen.</p>}
+            <p className="small text-2">
+              Next, the <b>Getting started</b> checklist on the Today screen shows you around. Tap <b>?</b> on any screen for help.
+            </p>
           </div>
         )}
       </div>
@@ -168,6 +187,7 @@ export function Onboarding() {
           </button>
         )}
       </div>
+      {install && <InstallSheet onClose={() => setInstall(false)} />}
     </div>
   )
 }
