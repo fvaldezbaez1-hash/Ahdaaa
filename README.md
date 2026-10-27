@@ -3,6 +3,10 @@
 Blocks ads, trackers, and malware sites in **every app and browser** on your
 phone. No root, no account, no subscription, nothing leaves your phone.
 
+> **Also in this repo:** [Forge](fitness/README.md), a private fitness app
+> (workout logger + food diary + smart calorie targets) that installs to your
+> home screen on iPhone and Android.
+
 ---
 
 ## Quick setup (about 1 minute)

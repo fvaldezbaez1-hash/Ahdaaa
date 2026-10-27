@@ -1,0 +1,59 @@
+name: Forge fitness app
+
+on:
+  push:
+    paths:
+      - 'fitness/**'
+      - '.github/workflows/fitness.yml'
+  pull_request:
+    paths:
+      - 'fitness/**'
+      - '.github/workflows/fitness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: fitness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: fitness
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fitness/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      # On the main branch, publish the app to GitHub Pages so it has a
+      # permanent link you can open on your phone and add to your home screen.
+      - if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: fitness/dist
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
