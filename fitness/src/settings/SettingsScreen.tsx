@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { fmtClock } from '../lib/dates'
-import { GOAL_RATES } from '../lib/energy'
+import { GOAL_LABEL, GOAL_RATES } from '../lib/energy'
 import { updateSettings } from '../lib/settings'
 import type { Settings } from '../lib/types'
 import { fmtKcal } from '../lib/units'
@@ -81,7 +81,7 @@ export function SettingsScreen() {
   const goalLabel =
     st.goal.type === 'maintain'
       ? 'Maintain weight'
-      : `${st.goal.type === 'lose' ? 'Lose fat' : 'Build muscle'} · ${GOAL_RATES[st.goal.type].find((r) => r.pct === st.goal.ratePct)?.label ?? `${st.goal.ratePct}%/wk`}`
+      : `${GOAL_LABEL[st.goal.type]} · ${GOAL_RATES[st.goal.type].find((r) => r.pct === st.goal.ratePct)?.label ?? `${st.goal.ratePct}%/wk`}`
 
   return (
     <div className="screen no-tabs">

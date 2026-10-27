@@ -20,6 +20,7 @@ import { InstallSheet, isInstalled } from '../settings/SettingsScreen'
 import { useBeginWorkout } from '../workout/WorkoutTab'
 import { GettingStarted } from '../help/GettingStarted'
 import { HelpButton } from '../help/Tip'
+import { StrengthCheck } from '../progress/StrengthCheck'
 
 const DISMISS_INSTALL = 'forge:install-dismissed'
 
@@ -250,6 +251,8 @@ export function TodayScreen() {
             </div>
           )}
         </div>
+
+        <StrengthCheck />
 
         <div className="card stack">
           <div className="row">

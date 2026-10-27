@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { BUILTIN_EXERCISES } from '../data/exercises'
 import { platesPerSide, PLATES_KG, PLATES_LB } from './plates'
 import { incrementFor, suggestSets } from './progression'
-import { e1rm, findPRs, repMaxes, workoutStats } from './strength'
+import { e1rm, findPRs, repMaxes, strengthTrend, workoutStats } from './strength'
 import type { Exercise, WSet, Workout } from './types'
 import { KG_PER_LB, kgTo } from './units'
 
@@ -95,5 +95,30 @@ describe('platesPerSide', () => {
     expect(platesPerSide(225, 45, PLATES_LB).perSide).toEqual([45, 45])
     expect(platesPerSide(138, 45, PLATES_LB)).toEqual({ perSide: [45], achieved: 135, remainder: 3 })
     expect(platesPerSide(30, 45, PLATES_LB)).toMatchObject({ perSide: [], achieved: 45 })
+  })
+})
+
+describe('strengthTrend', () => {
+  const now = Date.UTC(2026, 9, 27, 12)
+  const day = 86_400_000
+  const ses = (daysAgo: number, entries: [string, number, number][]): Workout => ({
+    id: `t${daysAgo}`, name: 'W', start: now - daysAgo * day, end: now - daysAgo * day + 3_600_000,
+    exercises: entries.map(([ex, kg, reps], i) => ({ id: `e${daysAgo}-${i}`, exerciseId: ex, sets: [set(kg, reps)] })),
+  })
+
+  it('compares the last two weeks with the four weeks before', () => {
+    const ws = [
+      ses(30, [['bench-press-barbell', 100, 5], ['squat-barbell', 140, 5]]),
+      ses(5, [['bench-press-barbell', 100, 5], ['squat-barbell', 126, 5]]),
+    ]
+    const t = strengthTrend(ws, exMap, now)!
+    expect(t.lifts).toBe(2)
+    expect(t.changePct).toBe(-5) // bench 0%, squat −10%
+    expect(t.down).toEqual(['squat-barbell'])
+  })
+
+  it('needs at least two lifts in both windows and ignores old sessions', () => {
+    expect(strengthTrend([ses(30, [['bench-press-barbell', 100, 5]]), ses(3, [['bench-press-barbell', 105, 5]])], exMap, now)).toBeUndefined()
+    expect(strengthTrend([ses(60, [['bench-press-barbell', 100, 5], ['squat-barbell', 140, 5]]), ses(3, [['bench-press-barbell', 100, 5], ['squat-barbell', 140, 5]])], exMap, now)).toBeUndefined()
   })
 })

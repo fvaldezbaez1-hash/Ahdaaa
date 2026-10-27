@@ -103,3 +103,17 @@ describe('targets', () => {
     expect(t.protein).toBe(Math.round(2 * 27 * 1.75 ** 2))
   })
 })
+
+describe('Get shredded', () => {
+  it('runs a deficit like a cut', () => {
+    expect(goalDelta({ type: 'shred', ratePct: 0.5 }, 80)).toBeCloseTo(-440)
+  })
+
+  it('raises protein to at least 2.2 g/kg', () => {
+    const base = { expenditure: 2600, weightKg: 80, heightCm: 180, sex: 'male' as const, fatPct: 30 }
+    expect(computeTargets({ ...base, goal: { type: 'shred', ratePct: 0.5 }, proteinPerKg: 1.8 }).protein).toBe(176)
+    expect(computeTargets({ ...base, goal: { type: 'lose', ratePct: 0.5 }, proteinPerKg: 1.8 }).protein).toBe(144)
+    // A higher personal setting is kept.
+    expect(computeTargets({ ...base, goal: { type: 'shred', ratePct: 0.5 }, proteinPerKg: 2.5 }).protein).toBe(200)
+  })
+})
