@@ -112,9 +112,14 @@ export function GettingStarted({ onLogWeight }: { onLogWeight: () => void }) {
         ))}
       </ol>
       <div className="row between">
-        <button className="btn ghost sm" style={{ paddingLeft: 0 }} onClick={() => navigate('/help')}>
-          <Icon name="help" size={16} /> How to use Forge
-        </button>
+        <div className="row" style={{ gap: 4 }}>
+          <button className="btn ghost sm" style={{ paddingLeft: 0 }} onClick={() => navigate('/tour')}>
+            <Icon name="play" size={12} /> Tutorial
+          </button>
+          <button className="btn ghost sm" onClick={() => navigate('/help')}>
+            <Icon name="help" size={16} /> Help
+          </button>
+        </div>
         <button className="btn ghost sm" style={{ color: 'var(--muted)' }} onClick={() => void updateSettings({ checklistHidden: true })}>
           Hide
         </button>

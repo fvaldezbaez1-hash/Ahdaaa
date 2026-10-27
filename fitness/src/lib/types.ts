@@ -259,4 +259,6 @@ export interface Settings {
   tipsSeen?: string[]
   /** The Today screen's "Getting started" checklist was closed. */
   checklistHidden?: boolean
+  /** The tutorial has been shown once (it can always be replayed). */
+  tourSeen?: boolean
 }
