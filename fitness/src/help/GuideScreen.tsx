@@ -282,7 +282,10 @@ export function GuideScreen({ open }: { open?: string }) {
     <div className="screen no-tabs">
       <Topbar title="How to use Forge" back="/" />
       <div className="stack">
-        <p className="text-2">Tap a topic to open it.</p>
+        <button className="btn primary block" onClick={() => navigate('/tour')}>
+          <Icon name="play" size={14} /> Replay the tutorial
+        </button>
+        <p className="text-2">Or tap a topic below to read about it.</p>
         {list.map((s) => (
           <details key={s.id} id={`guide-${s.id}`} className="card guide" open={s.id === open}>
             <summary>

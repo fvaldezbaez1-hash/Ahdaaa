@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { fmtClock } from './lib/dates'
-import { navigate, useRoute } from './router'
+import { goBack, navigate, useRoute } from './router'
 import { FoodTab } from './food/FoodTab'
 import { AddFoodScreen } from './food/AddFood'
 import { Onboarding } from './settings/Onboarding'
@@ -10,6 +10,8 @@ import { GoalsScreen } from './settings/GoalsScreen'
 import { ProgressTab } from './progress/ProgressTab'
 import { TodayScreen } from './today/TodayScreen'
 import { GuideScreen } from './help/GuideScreen'
+import { Tour } from './help/Tour'
+import { updateSettings } from './lib/settings'
 import { useSettings } from './state'
 import { Icon, type IconName } from './ui/Icon'
 import { useNow } from './ui/hooks'
@@ -84,6 +86,8 @@ export function App() {
   }, [st.theme])
 
   if (!st.onboarded) return <Onboarding />
+  // Play the tutorial once after setup (or after this update, for existing users).
+  if (!st.tourSeen && !active) return <Tour onDone={() => void updateSettings({ tourSeen: true })} />
 
   let screen: React.ReactNode
   let tabs = true
@@ -131,6 +135,17 @@ export function App() {
       break
     case 'exercises':
       screen = <ExercisesScreen />
+      tabs = false
+      break
+    case 'tour':
+      screen = (
+        <Tour
+          onDone={() => {
+            void updateSettings({ tourSeen: true })
+            goBack('/')
+          }}
+        />
+      )
       tabs = false
       break
     case 'help':

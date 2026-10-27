@@ -90,6 +90,7 @@ export function SettingsScreen() {
         <section className="stack tight">
           <div className="field-label">Help</div>
           <div className="list">
+            <Row label="Replay tutorial" hint="The quick tour of how Forge works (1 minute)" onClick={() => navigate('/tour')} />
             <Row label="How to use Forge" hint="Step-by-step guide to every part of the app" onClick={() => navigate('/help')} />
             <Row
               label="Show tips again"
