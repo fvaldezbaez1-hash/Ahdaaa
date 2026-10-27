@@ -2,7 +2,13 @@ name: Build APK
 
 on:
   push:
+    paths-ignore:
+      - 'fitness/**'
+      - '.github/workflows/fitness.yml'
   pull_request:
+    paths-ignore:
+      - 'fitness/**'
+      - '.github/workflows/fitness.yml'
   workflow_dispatch:
 
 permissions:
