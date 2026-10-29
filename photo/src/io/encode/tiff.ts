@@ -1,6 +1,6 @@
-// 16-bit RGB TIFF writer: little-endian, Adobe Deflate with horizontal
-// differencing (predictor 2) in ~1 MB strips — what Lightroom calls "ZIP" — with
-// EXIF and ICC tags. Strips are compressed one at a time to bound memory.
+// 16-bit RGB TIFF writer: little-endian, ~1 MB strips, EXIF and ICC tags.
+// Uncompressed by default — on real 16-bit photos Deflate ("ZIP") saved only
+// ~11% for 10× the time — with optional Deflate + horizontal predictor.
 import { createDeflater, concat } from './deflate'
 import { exifParts, type ExifInput } from './exif'
 import { ascii, long, rational, serializeTiff, short, tiffSize, UNDEFINED, type Ifd, type Tag } from './tiffIfd'
@@ -10,13 +10,13 @@ const LITTLE_ENDIAN_HOST = new Uint8Array(Uint16Array.of(1).buffer)[0] === 1
 export interface TiffOptions {
   exif?: ExifInput
   icc?: Uint8Array
-  /** Default true (deflate + predictor). */
+  /** Deflate + predictor 2 (default false). */
   compress?: boolean
 }
 
 /** Encode RGBA16 pixels (alpha dropped) as a 16-bit RGB TIFF. */
 export async function encodeTiff16(rgba: Uint16Array, width: number, height: number, opts: TiffOptions = {}): Promise<Blob> {
-  const compress = opts.compress ?? true
+  const compress = opts.compress ?? false
   const rowSamples = width * 3
   const rowsPerStrip = Math.max(1, Math.floor((1 << 20) / (rowSamples * 2)))
   const strips: Uint8Array[] = []

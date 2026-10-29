@@ -5,7 +5,7 @@ import { abortError, isAbort } from './abort'
 import { db } from './db'
 import { exportName, openSink } from './save'
 import { seams } from './seams'
-import type { ExportOptions, PhotoRecord } from './types'
+import type { DecodedPhoto, ExportOptions, PhotoRecord } from './types'
 import { decodeStored } from './working'
 
 export interface ExportProgress {
@@ -33,15 +33,17 @@ export function sourceEdgeFor(p: PhotoRecord, longEdge: number | undefined): num
 }
 
 async function exportOne(p: PhotoRecord, opts: ExportOptions, onFraction: (f: number) => void, signal?: AbortSignal): Promise<Blob> {
-  const d = await decodeStored(p, 'full', sourceEdgeFor(p, opts.longEdge), signal)
+  let d: DecodedPhoto | null = await decodeStored(p, 'full', sourceEdgeFor(p, opts.longEdge), signal)
   onFraction(0.35)
-  const r = await seams.render(p.recipe, d, {
+  const rendering = seams.render(p.recipe, d, {
     maxLongEdge: opts.longEdge,
     bitDepth: opts.format === 'tiff16' ? 16 : 8,
     colorSpace: opts.colorSpace,
     onProgress: (f) => onFraction(0.35 + 0.45 * f),
     signal,
   })
+  d = null // let the source (up to ~300 MB) go before encoding allocates
+  const r = await rendering
   onFraction(0.8)
   const exif = opts.keepMetadata ? { meta: p.meta, width: r.width, height: r.height, colorSpace: opts.colorSpace, includeGps: !opts.stripLocation } : undefined
   return seams.encode({ format: opts.format, rgba: r.data as Uint8ClampedArray<ArrayBuffer> | Uint16Array, width: r.width, height: r.height, quality: opts.quality, exif, colorSpace: opts.colorSpace }, signal)

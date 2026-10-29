@@ -29,7 +29,19 @@ export async function decodeStored(p: PhotoRecord, quality: 'preview' | 'full', 
   return seams.decode(original.blob, { fileName: p.fileName, quality, maxLongEdge, fullSize: { width: p.width, height: p.height }, previewOnly: p.previewOnly, signal })
 }
 
-export async function loadWorking(id: string, maxLongEdge = workingLongEdge()): Promise<DecodedPhoto> {
+/**
+ * Half-size RAW decoding is ~5× faster than full size; when it comes close to
+ * the working size it's the better trade (Lightroom edits on 2560 px previews).
+ */
+function workingEdge(rec: Pick<PhotoRecord, 'kind' | 'width' | 'height'> | undefined, maxLongEdge: number): number {
+  if (rec?.kind !== 'raw') return maxLongEdge
+  const half = Math.floor(longEdge(rec.width, rec.height) / 2)
+  return half >= 0.75 * maxLongEdge && half < maxLongEdge ? half : maxLongEdge
+}
+
+export async function loadWorking(id: string, requested = workingLongEdge()): Promise<DecodedPhoto> {
+  const rec = await db.photos.get(id)
+  const maxLongEdge = workingEdge(rec, requested)
   const hit = cache.get(id)
   if (hit) {
     const edge = longEdge(hit.image.width, hit.image.height)
@@ -45,7 +57,6 @@ export async function loadWorking(id: string, maxLongEdge = workingLongEdge()): 
   let p = inflight.get(key)
   if (!p) {
     p = (async () => {
-      const rec = await db.photos.get(id)
       if (!rec) throw new Error('This photo is no longer in the library.')
       const d = await decodeStored(rec, 'full', maxLongEdge)
       cache.delete(id)

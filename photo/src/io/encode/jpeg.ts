@@ -1,5 +1,5 @@
 // JPEG export through MozJPEG (WASM), with our own EXIF (APP1) and ICC (APP2)
-// segments spliced in after SOI/JFIF.
+// segments spliced in after SOI/JFIF. Output is baseline (sequential) JPEG.
 import encode from '@jsquash/jpeg/encode'
 
 export interface JpegOptions {
@@ -38,7 +38,10 @@ export async function encodeJpeg(rgba: Uint8ClampedArray, width: number, height:
   const image = { data: rgba, width, height, colorSpace: 'srgb' } as ImageData
   const buf = await encode(image, {
     quality,
-    progressive: true,
+    // `baseline` skips MozJPEG's progressive scan search: on a 26 MP photo 16 s → 6 s
+    // for ~4% more bytes (trellis quantization, the rest of its edge, stays on).
+    baseline: true,
+    progressive: false,
     optimize_coding: true,
     // Full-resolution color for high quality settings, like Lightroom above ~90.
     auto_subsample: false,
