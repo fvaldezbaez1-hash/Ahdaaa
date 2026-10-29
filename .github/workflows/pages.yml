@@ -1,0 +1,69 @@
+name: Publish apps to GitHub Pages
+
+# GitHub Pages serves one site per repository, so Forge and Lumen are built
+# and deployed together: Forge at the site root, Lumen under /photo/.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'fitness/**'
+      - 'photo/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            fitness/package-lock.json
+            photo/package-lock.json
+
+      - name: Build Forge
+        working-directory: fitness
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Lumen
+        working-directory: photo
+        run: |
+          npm ci
+          npm run build
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r fitness/dist/. _site/
+          mkdir -p _site/photo
+          cp -r photo/dist/. _site/photo/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

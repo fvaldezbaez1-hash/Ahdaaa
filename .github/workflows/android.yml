@@ -4,11 +4,17 @@ on:
   push:
     paths-ignore:
       - 'fitness/**'
+      - 'photo/**'
       - '.github/workflows/fitness.yml'
+      - '.github/workflows/photo.yml'
+      - '.github/workflows/pages.yml'
   pull_request:
     paths-ignore:
       - 'fitness/**'
+      - 'photo/**'
       - '.github/workflows/fitness.yml'
+      - '.github/workflows/photo.yml'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:

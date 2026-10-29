@@ -157,6 +157,20 @@ export function relativeWbForNeutral(rgb: Vec3): { temp: number; tint: number } 
   return { temp: Math.round(Math.max(-100, Math.min(100, t))), tint: Math.round(Math.max(-100, Math.min(100, c))) }
 }
 
+/**
+ * Camera RGB (white-balanced) → linear sRGB, derived from a camera's XYZ→camera
+ * matrix the way dcraw/LibRaw do it (rows normalized so white stays white).
+ * Lets any RAW decoder that reports `camXyz` feed the same color pipeline.
+ */
+export function rgbCamFromCamXyz(camXyz: Mat3): Mat3 {
+  const camRgb = mul(camXyz, SRGB_TO_XYZ)
+  for (let r = 0; r < 3; r++) {
+    const s = camRgb[r * 3] + camRgb[r * 3 + 1] + camRgb[r * 3 + 2]
+    for (let c = 0; c < 3; c++) camRgb[r * 3 + c] /= s
+  }
+  return inv(camRgb)
+}
+
 /** Common light sources, in Kelvin / tint, for the RAW white-balance menu. */
 export const WB_PRESETS: Record<'daylight' | 'cloudy' | 'shade' | 'tungsten' | 'fluorescent' | 'flash', { temp: number; tint: number }> = {
   daylight: { temp: 5500, tint: 10 },

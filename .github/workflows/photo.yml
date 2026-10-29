@@ -1,0 +1,41 @@
+name: Lumen photo editor
+
+# Lint, test and build Lumen on every change. Publishing happens in pages.yml.
+
+on:
+  push:
+    paths:
+      - 'photo/**'
+      - '.github/workflows/photo.yml'
+  pull_request:
+    paths:
+      - 'photo/**'
+      - '.github/workflows/photo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: photo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: photo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: photo/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { curveLut } from './curve'
 import { apply, inv, mat3, mul, REC2020_TO_SRGB, SRGB_TO_REC2020, type Mat3, type Vec3 } from './matrices'
 import {
-  cameraMultipliers, rawWbForNeutral, rawWbRatio, relativeWbForNeutral, relativeWbMatrix, shiftWb,
+  cameraMultipliers, rawWbForNeutral, rawWbRatio, relativeWbForNeutral, relativeWbMatrix, rgbCamFromCamXyz, shiftWb,
   tempTintFromMultipliers, tempTintFromXy, xyFromTempTint,
 } from './wb'
 
@@ -67,6 +67,10 @@ describe('RAW white balance', () => {
     const r = rawWbRatio(SONY_CAM_XYZ, shot, wb.temp, wb.tint)
     const out = [sample[0] * r[0], sample[1] * r[1], sample[2] * r[2]]
     close([out[0] / out[1], out[2] / out[1]], [1, 1], 1e-3)
+  })
+  it('derives the camera→sRGB matrix like LibRaw', () => {
+    // LibRaw's rgb_cam for the same Sony sample.
+    close(rgbCamFromCamXyz(SONY_CAM_XYZ), [1.5708, -0.3946, -0.1762, -0.1713, 1.6316, -0.4602, -0.0181, -0.4145, 1.4325], 0.003)
   })
   it('shifts by mireds and clamps', () => {
     expect(shiftWb('raw', { temp: 5000, tint: 0 }, 20, 5).temp).toBeGreaterThan(5000)
