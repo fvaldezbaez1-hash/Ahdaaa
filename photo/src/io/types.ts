@@ -52,6 +52,11 @@ export interface PhotoRecord {
   editedAt?: number
   /** Bumped whenever the thumbnail is re-rendered. */
   thumbVersion: number
+  /**
+   * RAW file shown through the camera's embedded JPEG preview because no RAW
+   * decoder could develop it (kind is then 'display'). Re-decode when one can.
+   */
+  previewOnly?: boolean
 }
 
 export interface OriginalRecord {
@@ -95,6 +100,10 @@ export interface DecodedPhoto {
   meta: PhotoMeta
   kind: SourceKind
   raw?: RawColorInfo
+  /** A RAW file decoded from its embedded JPEG preview (see PhotoRecord.previewOnly). */
+  previewOnly?: boolean
+  /** Something the user should know about this decode, ready to show. */
+  notice?: string
 }
 
 export type ExportFormat = 'jpeg' | 'png' | 'tiff16'
