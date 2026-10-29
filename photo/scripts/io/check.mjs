@@ -2,7 +2,9 @@
 // RAW/JPEG files through the real API, loads working images, exports
 // JPEG/PNG/TIFF16 through the test sink, then verifies the files here in Node
 // (exifr + structure) and with Pillow when available.
-// Usage (in photo/): node scripts/io/check.mjs [samplesDir] [jpegDir] [outDir]
+// Usage (in photo/): node scripts/io/check.mjs [--build] <rawSamplesDir> <jpegDir> <outDir>
+// (or set LUMEN_SAMPLES, LUMEN_JPEGS, LUMEN_OUT). --build runs a production
+// build of the check page instead of the dev server (tests worker/WASM bundling).
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -11,24 +13,32 @@ import { pathToFileURL } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const { chromium } = require('playwright')
-const { createServer } = await import(pathToFileURL(require.resolve('vite')).href)
+const vite = await import(pathToFileURL(require.resolve('vite')).href)
 const exifr = (await import('exifr')).default
 
-const scratch = '/tmp/claude-0/-home-user-Ahdaaa/cf4d7424-a810-59a5-8866-82dcbe7ba388/scratchpad'
-const samples = resolve(process.argv[2] ?? `${scratch}/samples`)
-const jpegs = resolve(process.argv[3] ?? `${scratch}/lumen-assets`)
-const outDir = resolve(process.argv[4] ?? `${scratch}/agents/io/out`)
+const [samplesArg = process.env.LUMEN_SAMPLES, jpegsArg = process.env.LUMEN_JPEGS, outArg = process.env.LUMEN_OUT] = process.argv.slice(2).filter((a) => a !== '--build')
+const prod = process.argv.includes('--build')
+if (!samplesArg || !jpegsArg || !outArg) {
+  console.error('Usage: node scripts/io/check.mjs <rawSamplesDir> <jpegDir> <outDir>')
+  process.exit(2)
+}
+const samples = resolve(samplesArg), jpegs = resolve(jpegsArg), outDir = resolve(outArg)
 mkdirSync(outDir, { recursive: true })
 
-const server = await createServer({
-  root: resolve('.'),
-  configFile: false,
-  logLevel: 'error',
-  server: { port: 5202, strictPort: true },
-  worker: { format: 'es' },
-  optimizeDeps: { entries: ['scripts/io/check.html'], include: ['dexie', 'exifr', 'utif2'], exclude: ['libraw-wasm', '@jsquash/jpeg'] },
-})
-await server.listen()
+const common = { root: resolve('.'), configFile: false, logLevel: 'error', base: './', worker: { format: 'es' } }
+let server
+if (prod) {
+  const buildDir = join(outDir, '..', 'io-check-build')
+  await vite.build({ ...common, build: { outDir: buildDir, emptyOutDir: true, target: 'es2022', rollupOptions: { input: resolve('scripts/io/check.html') } } })
+  server = await vite.preview({ ...common, build: { outDir: buildDir }, preview: { port: 5202, strictPort: true } })
+} else {
+  server = await vite.createServer({
+    ...common,
+    server: { port: 5202, strictPort: true },
+    optimizeDeps: { entries: ['scripts/io/check.html'], include: ['dexie', 'exifr', 'utif2'], exclude: ['libraw-wasm', '@jsquash/jpeg'] },
+  })
+  await server.listen()
+}
 const browser = await chromium.launch()
 const page = await browser.newPage()
 page.on('pageerror', (e) => console.log('pageerror', e.message))
