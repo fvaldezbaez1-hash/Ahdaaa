@@ -1,0 +1,148 @@
+/* Sheets used by the library, the editor (export) and settings. */
+
+/* ---------- Shared ---------- */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+}
+.setting-row .lbl {
+  min-width: 0;
+}
+.setting-row .lbl b {
+  display: block;
+  font-weight: 600;
+}
+.setting-row .lbl small {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.setting-row select {
+  max-width: 220px;
+}
+.lib-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.lib-foot .grow {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.btn.danger-fill {
+  background: var(--danger);
+  color: #fff;
+}
+.btn.danger-fill:hover:not(:disabled) {
+  background: var(--danger);
+  filter: brightness(1.08);
+}
+.sheet-text {
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+@media (max-width: 899px) {
+  .lib-foot .btn {
+    height: 44px;
+    font-size: 15px;
+    flex: 1;
+  }
+  .lib-foot .grow {
+    display: none;
+  }
+}
+
+/* ---------- Import sheet ---------- */
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 20px;
+  border: 1.5px dashed var(--line-2);
+  border-radius: 12px;
+  text-align: center;
+}
+.drop-zone .icon {
+  color: var(--accent);
+}
+.formats {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.55;
+}
+.formats b {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text);
+  font-weight: 600;
+}
+.skipped {
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 12.5px;
+}
+.skipped .list-row {
+  min-height: 0;
+  padding: 8px 12px;
+  justify-content: space-between;
+}
+
+/* ---------- Preset / album pickers ---------- */
+.pick-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+.pick-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 56px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  text-align: left;
+}
+.pick-item:hover {
+  border-color: var(--line-2);
+}
+.pick-item[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.pick-item b {
+  font-weight: 600;
+}
+.pick-item small {
+  color: var(--text-3);
+  font-size: 11.5px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0 4px;
+}
+.chips .chip {
+  flex: none;
+}
+.album-row .cover {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--panel-3);
+}
+

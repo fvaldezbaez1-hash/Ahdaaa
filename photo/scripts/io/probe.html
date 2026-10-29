@@ -1,0 +1,25 @@
+<!doctype html>
+<html><body><script type="module">
+import LibRaw from 'libraw-wasm';
+window.run = async (url, settings) => {
+  const out = {};
+  let t = performance.now();
+  const buf = new Uint8Array(await (await fetch(url)).arrayBuffer());
+  out.fetch = Math.round(performance.now() - t); t = performance.now();
+  const raw = new LibRaw();
+  await raw.metadata(false).catch(() => {});
+  out.create = Math.round(performance.now() - t); t = performance.now();
+  await raw.open(buf, settings);
+  out.open = Math.round(performance.now() - t); t = performance.now();
+  const meta = await raw.metadata(true);
+  out.meta = Math.round(performance.now() - t); t = performance.now();
+  const th = await raw.thumbnailData().catch((e) => ({ err: e.message }));
+  out.thumb = Math.round(performance.now() - t); t = performance.now();
+  const img = await raw.imageData();
+  out.image = Math.round(performance.now() - t); t = performance.now();
+  raw.dispose();
+  const c = meta.color_data || {};
+  return { ...out, w: img.width, h: img.height, mw: meta.width, mh: meta.height, flip: meta.flip, ts: String(meta.timestamp), tz: Intl.DateTimeFormat().resolvedOptions().timeZone, thumbInfo: th && (th.err || [th.width, th.height, th.format, th.data?.length]), gps: meta.gps_data, lens: meta.lens && meta.lens.Lens, mn: meta.lens && meta.lens.makernotes && meta.lens.makernotes.Lens, artist: meta.artist, software: meta.software, cam_mul: c.cam_mul, pre_mul: c.pre_mul, rgb_cam: c.rgb_cam, cam_xyz: c.cam_xyz, mem: performance.memory && Math.round(performance.memory.usedJSHeapSize / 1e6) };
+};
+window.ready = true;
+</script></body></html>
