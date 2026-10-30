@@ -237,10 +237,12 @@ async function contextLoss(name) {
   const ext = gl.getExtension('WEBGL_lose_context')
   const restored = new Promise((res) => engine.onContextRestored(res))
   const lost = new Promise((res) => canvas.addEventListener('webglcontextlost', res, { once: true }))
+  const within = (pr, step) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => rej(new Error('timed out waiting for ' + step)), 10000))])
   ext.loseContext()
-  await lost
+  await within(lost, 'webglcontextlost')
+  await new Promise((r) => setTimeout(r, 100)) // restoring during the lost event's dispatch is not allowed
   ext.restoreContext()
-  await restored
+  await within(restored, 'onContextRestored')
   engine.render(recipeFor(name))
   const px = new Uint8Array(4)
   gl.readPixels(200, 150, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px)

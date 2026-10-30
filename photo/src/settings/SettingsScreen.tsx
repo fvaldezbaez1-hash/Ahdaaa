@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { version } from '../../package.json'
 import { AiSettings } from '../assistant/AiSettings'
+import { SHORTCUTS as EDITOR_SHORTCUTS } from '../editor/shortcuts'
 import type { ExportOptions } from '../io/types'
 import { ExportFields } from '../library/ExportFields'
 import { MOD } from '../library/platform'
@@ -148,7 +149,10 @@ export function SettingsScreen() {
             </Section>
 
             {!phone && (
-              <Section id="keys" title="Keyboard shortcuts" desc="In the library. Shortcuts pause while you type in a field.">
+              <Section id="keys" title="Keyboard shortcuts" desc="Shortcuts pause while you type in a field.">
+                <h3 className="small muted" style={{ margin: '0 0 6px' }}>
+                  Library
+                </h3>
                 <div className="set-card">
                   <dl className="keys">
                     {SHORTCUTS.map((s) => (
@@ -170,6 +174,21 @@ export function SettingsScreen() {
                           ))}
                         </dt>
                         <dd>{s.what}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+                <h3 className="small muted" style={{ margin: '14px 0 6px' }}>
+                  Editor
+                </h3>
+                <div className="set-card">
+                  <dl className="keys">
+                    {EDITOR_SHORTCUTS.map((s) => (
+                      <div key={s.action} style={{ display: 'contents' }}>
+                        <dt>
+                          <kbd>{s.keys}</kbd>
+                        </dt>
+                        <dd>{s.action}</dd>
                       </div>
                     ))}
                   </dl>

@@ -19,6 +19,9 @@ let active: StageView | null = null
 
 /** Toolbar / shortcut access to the mounted stage. */
 export const stageControl = {
+  attach: (s: StageView | null) => {
+    active = s
+  },
   toggleZoom: () => active?.toggleZoom(),
   zoomBy: (factor: number) => active?.zoomTo(view.get().zoom * factor),
   fit: () => active?.zoomTo(1),
@@ -66,7 +69,6 @@ export class StageView {
       }),
       engine.onContextRestored(() => this.request()),
     )
-    active = this
   }
 
   setStage(width: number, height: number, pad: number) {
@@ -101,6 +103,18 @@ export class StageView {
     this.pan.x = ax - this.stageW / 2 - (ax - this.stageW / 2 - this.pan.x) * k
     this.pan.y = ay - this.stageH / 2 - (ay - this.stageH / 2 - this.pan.y) * k
     if (next === 1) this.pan = { x: 0, y: 0 }
+    this.zoomedAt = performance.now()
+    view.set({ zoom: next })
+    this.request()
+  }
+
+  /** Pinch: zoom from `z0`/`pan0` so the photo point that was under `a0` ends up under `a`. */
+  pinch(z0: number, pan0: { x: number; y: number }, a0: { x: number; y: number }, z: number, a: { x: number; y: number }) {
+    if (view.get().tool === 'crop') return
+    const { min, max } = this.zoomLimits()
+    const next = Math.min(max, Math.max(min, z))
+    const k = next / z0, cx = this.stageW / 2, cy = this.stageH / 2
+    this.pan = { x: a.x - cx - (a0.x - cx - pan0.x) * k, y: a.y - cy - (a0.y - cy - pan0.y) * k }
     this.zoomedAt = performance.now()
     view.set({ zoom: next })
     this.request()
@@ -180,6 +194,5 @@ export class StageView {
     clearTimeout(this.histTimer)
     clearTimeout(this.settleTimer)
     this.unsubs.forEach((u) => u())
-    if (active === this) active = null
   }
 }

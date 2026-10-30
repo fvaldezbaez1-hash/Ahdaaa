@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import { useMediaQuery } from '../ui/hooks'
 import type { Histogram, ViewMode } from '../engine/types'
 
 // UI state of the editing screen that several parts share (toolbar, stage,
@@ -6,6 +7,7 @@ import type { Histogram, ViewMode } from '../engine/types'
 // directly so changes repaint without re-rendering React.
 
 export type Tool = 'crop' | null
+export type SheetId = 'export' | 'paste' | 'shortcuts' | null
 
 export interface ViewState {
   mode: ViewMode
@@ -26,10 +28,16 @@ export interface ViewState {
   zoom100: number
   /** Histogram of the last full render. */
   histogram: Histogram | null
+  sheet: SheetId
+  /** The AI assistant replaces the adjustments column (desktop) or covers the editor (phone). */
+  ai: boolean
+  /** Desktop: the presets & history column, shown by default only on wide screens. */
+  leftPanel: { wide: boolean; narrow: boolean }
 }
 
 const initial: ViewState = {
   mode: 'after', split: 0.5, holding: false, clipping: false, tool: null, eyedropper: false, leveling: false, grid: 'none', zoom: 1, zoom100: 1, histogram: null,
+  sheet: null, ai: false, leftPanel: { wide: true, narrow: false },
 }
 
 let state = initial
@@ -44,9 +52,10 @@ export const view = {
     state = { ...state, ...patch }
     listeners.forEach((l) => l())
   },
-  /** Fresh state for a newly opened photo (keeps the compare mode and clipping preference). */
+  /** Fresh state for a newly opened photo (keeps the compare mode, clipping and panel choices). */
   reset() {
-    view.set({ ...initial, mode: state.mode === 'before' ? 'after' : state.mode, split: state.split, clipping: state.clipping })
+    const { split, clipping, ai, leftPanel } = state
+    view.set({ ...initial, mode: state.mode === 'before' ? 'after' : state.mode, split, clipping, ai, leftPanel })
   },
   subscribe(fn: () => void) {
     listeners.add(fn)
@@ -58,4 +67,12 @@ export const view = {
 
 export function useView<T>(select: (s: ViewState) => T): T {
   return useSyncExternalStore(view.subscribe, () => select(state), () => select(initial))
+}
+
+/** The presets column: open by default on wide screens, closed below 1200 px (each remembered separately). */
+export function useLeftPanel(): [boolean, () => void] {
+  const wide = useMediaQuery('(min-width: 1200px)')
+  const pref = useView((s) => s.leftPanel)
+  const open = wide ? pref.wide : pref.narrow
+  return [open, () => view.set({ leftPanel: wide ? { ...pref, wide: !open } : { ...pref, narrow: !open } })]
 }

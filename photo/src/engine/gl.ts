@@ -270,6 +270,13 @@ export class Gpu {
       return out
     }
     const out = new Float32Array(width * height * 4)
+    // Without EXT_color_buffer_float, half-float targets may only be readable as HALF_FLOAT.
+    if (!this.caps.float32 && gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE) === gl.HALF_FLOAT) {
+      const half = new Uint16Array(width * height * 4)
+      gl.readPixels(x, y, width, height, gl.RGBA, gl.HALF_FLOAT, half)
+      for (let i = 0; i < half.length; i++) out[i] = halfToFloat(half[i])
+      return out
+    }
     gl.readPixels(x, y, width, height, gl.RGBA, gl.FLOAT, out)
     return out
   }
@@ -280,4 +287,11 @@ export class Gpu {
     this.programs.clear()
     this.gl.deleteVertexArray(this.vao)
   }
+}
+
+function halfToFloat(h: number): number {
+  const e = (h >> 10) & 0x1f, m = h & 0x3ff, s = h & 0x8000 ? -1 : 1
+  if (e === 0) return s * m * 2 ** -24
+  if (e === 31) return m ? NaN : s * Infinity
+  return s * (1 + m / 1024) * 2 ** (e - 15)
 }

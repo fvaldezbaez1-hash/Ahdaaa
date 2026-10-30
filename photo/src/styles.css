@@ -767,6 +767,10 @@ button.list-row:hover {
   box-shadow: var(--shadow);
   animation: rise 0.18s ease-out;
 }
+/* The panel takes focus on open for keyboard users; no ring around the whole dialog. */
+.sheet:focus-visible {
+  outline: none;
+}
 .sheet.wide {
   max-width: 720px;
 }

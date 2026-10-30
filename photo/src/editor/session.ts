@@ -36,17 +36,17 @@ export function useSession(): Session {
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 export function useEditorSession(id: string): { status: SessionStatus; retry: () => void } {
-  const [status, setStatus] = useState<SessionStatus>({ state: 'loading' })
   const [attempt, setAttempt] = useState(0)
+  const key = `${id}#${attempt}`
+  // The result belongs to one photo and attempt; anything else means "still loading".
+  const [result, setResult] = useState<{ key: string; status: SessionStatus } | null>(null)
 
   useEffect(() => {
     let cancelled = false
     let engine: Engine | null = null
-    setStatus({ state: 'loading' })
+    const setStatus = (status: SessionStatus) => !cancelled && setResult({ key, status })
     view.reset()
-    const fail = (reason: 'missing' | 'unsupported' | 'decode' | 'engine', message: string) => {
-      if (!cancelled) setStatus({ state: 'error', reason, message })
-    }
+    const fail = (reason: 'missing' | 'unsupported' | 'decode' | 'engine', message: string) => setStatus({ state: 'error', reason, message })
     void (async () => {
       const record = await db.photos.get(id)
       if (cancelled) return
@@ -79,7 +79,7 @@ export function useEditorSession(id: string): { status: SessionStatus; retry: ()
       cancelled = true
       engine?.dispose()
     }
-  }, [id, attempt])
+  }, [id, key])
 
-  return { status, retry: () => setAttempt((a) => a + 1) }
+  return { status: result?.key === key ? result.status : { state: 'loading' }, retry: () => setAttempt((a) => a + 1) }
 }
