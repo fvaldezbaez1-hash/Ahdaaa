@@ -272,8 +272,11 @@ async function desktop() {
   check(await page.getByRole('dialog').isVisible(), 'Export opens the export sheet')
   await shot(page, 'desktop-export')
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(1800)
-  const thumbAfter = await page.evaluate(async (id) => (await (await import('/src/io/db.ts')).db.photos.get(id)).thumbVersion, next)
+  // ~1.5 s after the last change, plus the render itself (slow in software GL under load).
+  const thumbAfter = await until(page, async ([id, v]) => {
+    const t = (await (await import('/src/io/db.ts')).db.photos.get(id)).thumbVersion
+    return t > v ? t : null
+  }, [next, thumbBefore], 10000).catch(() => thumbBefore)
   check(thumbAfter > thumbBefore, `thumbnail re-rendered after editing (v${thumbBefore} → v${thumbAfter})`)
   check((await page.evaluate(async () => (await import('/src/io/db.ts')).kvGet('lastPhoto'))) === next, 'remembers the last photo')
 
