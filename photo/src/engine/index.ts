@@ -4,6 +4,7 @@
 import type { Vec3 } from '../color/matrices'
 import { tempTintFromMultipliers } from '../color/wb'
 import { defaultRecipe } from '../edit/defaults'
+import { spotsOf } from '../edit/retouch'
 import type { EditRecipe, RetouchSpot } from '../edit/types'
 import { autoSettings } from './auto'
 import { renderTiled } from './export'
@@ -256,7 +257,7 @@ class WebGLEngine implements Engine {
     const M = marginFor(pixelScale, frameLong)
     const plain = this.scaledSource(scale)
     const base: FrameBase = {
-      outSize: proc, toSource: outputToSource(size, recipe.geometry, uncropped, proc), fullSize: size, src: this.retouch(plain, recipe.retouch, size), pixelScale, frameLong,
+      outSize: proc, toSource: outputToSource(size, recipe.geometry, uncropped, proc), fullSize: size, src: this.retouch(plain, spotsOf(recipe.retouch), size), pixelScale, frameLong,
       region: { x: -M, y: -M, w: proc.width + 2 * M, h: proc.height + 2 * M }, inner: { x: 0, y: 0, w: proc.width, h: proc.height },
     }
     const rect = fit <= 1
@@ -294,7 +295,7 @@ class WebGLEngine implements Engine {
     const fs = frameSize(size, g)
     const M = marginFor(pixelScale, Math.max(fs.width, fs.height))
     const region = { x: x0 - M, y: y0 - M, w: w + 2 * M, h: h + 2 * M }
-    const spots = recipe.retouch ?? []
+    const spots = spotsOf(recipe.retouch)
     // The window also holds whatever the spots inside it copy from.
     const b = retouchWindow(spots, img.width, img.height, mapBounds(toSource, region.x, region.y, region.x + region.w, region.y + region.h))
     const ix0 = Math.max(0, Math.min(img.width - 1, Math.floor(b.x0) - 3)), iy0 = Math.max(0, Math.min(img.height - 1, Math.floor(b.y0) - 3))
@@ -391,7 +392,7 @@ class WebGLEngine implements Engine {
 
   findHealSource(recipe: EditRecipe, x: number, y: number, r: number): { sx: number; sy: number } | null {
     const img = this.src?.img
-    return img ? findHealSource(img, recipe.retouch ?? [], x, y, r) : null
+    return img ? findHealSource(img, spotsOf(recipe.retouch), x, y, r) : null
   }
 
   onContextRestored(cb: () => void): () => void {

@@ -1,4 +1,6 @@
-import type { RetouchSpot } from '../../edit/types'
+import { useMemo } from 'react'
+import { isSpot, spotsOf } from '../../edit/retouch'
+import type { Retouch, RetouchSpot } from '../../edit/types'
 import { editor, useEditor } from '../../state/editor'
 import { Segmented } from '../../ui/controls'
 import { Slider } from '../../ui/Slider'
@@ -6,7 +8,7 @@ import { useView, view, type HealSettings } from '../view'
 import { radiusToSize, sizeToRadius } from './brush'
 import { deleteSpot, exitTool, updateSpots } from './modes'
 
-const mapSpot = (id: string, fn: (s: RetouchSpot) => RetouchSpot) => (r: { retouch: RetouchSpot[] }) => r.retouch.map((s) => (s.id === id ? fn(s) : s))
+const mapSpot = (id: string, fn: (s: RetouchSpot) => RetouchSpot) => (r: { retouch: Retouch[] }) => r.retouch.map((s) => (s.id === id && isSpot(s) ? fn(s) : s))
 
 /**
  * Heal & clone: settings for new spots; with a spot selected they edit that
@@ -15,7 +17,8 @@ const mapSpot = (id: string, fn: (s: RetouchSpot) => RetouchSpot) => (r: { retou
 export function HealPanel({ layout }: { layout: 'side' | 'strip' }) {
   const h = useView((s) => s.heal)
   const selectedId = useView((s) => s.spot)
-  const spots = useEditor((s) => s.recipe?.retouch)
+  const retouch = useEditor((s) => s.recipe?.retouch)
+  const spots = useMemo(() => (retouch ? spotsOf(retouch) : undefined), [retouch])
   const spot = spots?.find((s) => s.id === selectedId)
   const count = spots?.length ?? 0
 

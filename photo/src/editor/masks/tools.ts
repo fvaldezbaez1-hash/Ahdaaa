@@ -1,3 +1,4 @@
+import { spotsOf, withSpots } from '../../edit/retouch'
 import type { Mask, MaskShape, RetouchSpot } from '../../edit/types'
 import { uid } from '../../io/db'
 import { editor } from '../../state/editor'
@@ -144,7 +145,7 @@ type SpotDrag =
   | { kind: 'spot'; id: string; part: SpotPart; start: RetouchSpot; from: Pt; s: Space }
   | { kind: 'paint'; first: RetouchSpot; base: RetouchSpot[]; path: Pt[]; s: Space }
 
-const writeSpots = (spots: RetouchSpot[]) => editor.preview((r) => ({ ...r, retouch: spots }))
+const writeSpots = (spots: RetouchSpot[]) => editor.preview((r) => ({ ...r, retouch: withSpots(r.retouch, spots) }))
 
 export function createHealTool(session: Session, cursor: CursorFn): StageTool {
   const src = srcOf(session)
@@ -154,7 +155,7 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
     const r = editor.getState().recipe
     if (!p || !r) return cursor(null)
     const s = makeSpace(src, r.geometry, p.box)
-    if (hitSpot(r.retouch, s, p, reachFor(p))) return cursor(null)
+    if (hitSpot(spotsOf(r.retouch), s, p, reachFor(p))) return cursor(null)
     const h = view.get().heal
     const rad = sizeToRadius(h.size) * s.scale
     cursor({ x: p.x, y: p.y, r: rad, inner: rad * (1 - h.feather / 100) })
@@ -165,9 +166,9 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
       const r = editor.getState().recipe
       if (!r) return false
       const s = makeSpace(src, r.geometry, p.box)
-      const hit = hitSpot(r.retouch, s, p, reachFor(p))
+      const hit = hitSpot(spotsOf(r.retouch), s, p, reachFor(p))
       if (hit) {
-        const start = r.retouch.find((sp) => sp.id === hit.id)!
+        const start = spotsOf(r.retouch).find((sp) => sp.id === hit.id)!
         view.set({ spot: hit.id })
         drag = { kind: 'spot', id: hit.id, part: hit.part, start, from: p, s }
         return true
@@ -178,10 +179,10 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
       const found = session.engine.findHealSource?.(r, m.x, m.y, rad) ?? null
       const from = found ?? fallbackSource(m.x, m.y, rad, src)
       const first: RetouchSpot = { id: uid(), mode: h.mode, x: m.x, y: m.y, r: rad, sx: from.sx, sy: from.sy, feather: h.feather, opacity: h.opacity / 100 }
-      drag = { kind: 'paint', first, base: r.retouch, path: [], s }
+      drag = { kind: 'paint', first, base: spotsOf(r.retouch), path: [], s }
       view.set({ spot: first.id })
       cursor(null)
-      writeSpots([...r.retouch, first])
+      writeSpots([...spotsOf(r.retouch), first])
       return true
     },
     move(p) {
@@ -189,7 +190,7 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
       if (!d) return ring(p)
       if (d.kind === 'spot') {
         const moved = dragSpot(d.start, d.s, d.part, d.from, p)
-        writeSpots((editor.getState().recipe?.retouch ?? []).map((sp) => (sp.id === d.id ? moved : sp)))
+        writeSpots(spotsOf(editor.getState().recipe?.retouch).map((sp) => (sp.id === d.id ? moved : sp)))
       } else {
         d.path.push(d.s.toMask(p))
         writeSpots([...d.base, ...spotsAlong(d.first, d.path, src, uid)])
@@ -200,7 +201,7 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
       drag = null
       if (!d) return
       if (d.kind === 'spot') return editor.commit(d.part === 'edge' ? 'Heal spot size' : d.part === 'source' ? 'Move heal source' : 'Move heal spot')
-      const n = (editor.getState().recipe?.retouch.length ?? 0) - d.base.length
+      const n = spotsOf(editor.getState().recipe?.retouch).length - d.base.length
       const what = d.first.mode === 'heal' ? 'Heal' : 'Clone'
       editor.commit(n > 1 ? `${what} stroke` : `${what} spot`)
     },
@@ -208,7 +209,7 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
       const d = drag
       drag = null
       if (!d) return
-      writeSpots(d.kind === 'spot' ? (editor.getState().recipe?.retouch ?? []).map((sp) => (sp.id === d.id ? d.start : sp)) : d.base)
+      writeSpots(d.kind === 'spot' ? spotsOf(editor.getState().recipe?.retouch).map((sp) => (sp.id === d.id ? d.start : sp)) : d.base)
       editor.commit('')
       if (d.kind === 'paint') view.set({ spot: null })
     },

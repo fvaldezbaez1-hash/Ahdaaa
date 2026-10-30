@@ -119,4 +119,6 @@ export interface ExportOptions {
   keepMetadata: boolean
   /** Remove GPS location even when keeping other metadata. */
   stripLocation: boolean
+  /** Phase 3: AI "Super Resolution" — 2 doubles width and height before `longEdge` applies. */
+  upscale?: 1 | 2
 }

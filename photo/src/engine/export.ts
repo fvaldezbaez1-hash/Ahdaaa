@@ -3,6 +3,7 @@
 // window of the source it needs (so sources larger than the GPU's texture
 // limit work), through the same pipeline as the interactive view.
 
+import { spotsOf } from '../edit/retouch'
 import type { EditRecipe } from '../edit/types'
 import { frameSize, mapBounds, outputSize, outputToSource } from './geometry'
 import type { Gpu } from './gl'
@@ -31,7 +32,7 @@ export async function renderTiled(gpu: Gpu, recipe: EditRecipe, source: SourceIm
   const lowTex = gpu.uploadFloat(low.data, low.width, low.height, 3)
   const air = toWorkingSpace(params.input, atmosphericLight(low))
   const guide = computeGuide(gpu, lowTex, params.input, air, needsHaze(params), 'export')
-  const spots = recipe.retouch ?? []
+  const spots = spotsOf(recipe.retouch)
 
   // Big reductions: exact k×k box average on the CPU first, Mitchell for the remaining factor.
   const k = s <= 0.5 ? Math.floor(1 / s) : 1

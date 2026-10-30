@@ -58,6 +58,18 @@ export interface SampleOptions {
   developed?: boolean
 }
 
+/**
+ * Phase 3: a stored AI result handed to the engine by id (see `raster` / `fill` in edit/types).
+ * Masks: 1 channel, 0…255, covering the whole source (any resolution; the engine refines edges).
+ * Removal fills: 3 channels, linear 0…65535 in the source's color space, covering RemoveArea.rect.
+ */
+export interface RasterImage {
+  width: number
+  height: number
+  channels: 1 | 3
+  data: Uint8Array | Uint16Array
+}
+
 export interface Histogram {
   /** 256 bins each, of the rendered (display-encoded) image. */
   r: Uint32Array
@@ -85,6 +97,8 @@ export interface ExportRenderOptions {
   colorSpace: 'srgb' | 'display-p3'
   onProgress?: (fraction: number) => void
   signal?: AbortSignal
+  /** Phase 3: the stored AI results the recipe refers to (AI masks, removal fills). */
+  rasters?: ReadonlyMap<string, RasterImage>
 }
 
 export interface Engine {
@@ -133,6 +147,11 @@ export interface Engine {
    * nearby texture that best matches the spot's surroundings. null if none fits.
    */
   findHealSource?(recipe: EditRecipe, x: number, y: number, r: number): { sx: number; sy: number } | null
+  /**
+   * Phase 3: provide (or with null, drop) a stored AI result the recipe refers to by id.
+   * A recipe whose AI mask or fill isn't provided renders as if that mask / removal were empty.
+   */
+  setRaster?(id: string, img: RasterImage | null): void
   /** WebGL context loss: re-upload the source and render again. */
   onContextRestored(cb: () => void): () => void
   dispose(): void

@@ -1,4 +1,5 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { spotsOf } from '../../edit/retouch'
 import type { Mask, RetouchSpot } from '../../edit/types'
 import { editor, useEditor } from '../../state/editor'
 import { useSession } from '../session'
@@ -91,7 +92,8 @@ export function ToolOverlay() {
   const maskId = useView((s) => s.mask)
   const spotId = useView((s) => s.spot)
   const layer = useEditor((s) => s.recipe?.layers.find((l) => l.id === layerId))
-  const spots = useEditor((s) => s.recipe?.retouch)
+  const retouch = useEditor((s) => s.recipe?.retouch)
+  const spots = useMemo(() => (retouch ? spotsOf(retouch) : undefined), [retouch])
   const geometry = useEditor((s) => s.recipe?.geometry)
   const ring = useRef<HTMLDivElement>(null)
 
