@@ -77,7 +77,7 @@ const jpegSize = (b) => {
     i += 2 + len
   }
 }
-for (const name of readdirSync(outDir)) {
+for (const name of readdirSync(outDir).filter((n) => !n.startsWith('thumb-'))) {
   const b = readFileSync(join(outDir, name))
   const meta = await exifr.parse(b, { tiff: true, exif: true, icc: true }).catch((e) => ({ error: e.message }))
   let pil = ''

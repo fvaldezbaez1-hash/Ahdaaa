@@ -10,6 +10,13 @@ export interface SourceImage {
   width: number
   height: number
   data: Uint16Array
+  /**
+   * Width of the full-resolution original when this is a downscaled copy (working
+   * image, thumbnail source). Lets pixel-sized effects (sharpening radius, noise
+   * reduction, grain) look in the preview as they will in the full-size export.
+   * Omit for full-resolution images.
+   */
+  fullWidth?: number
 }
 
 /** How to interpret a SourceImage's numbers. */

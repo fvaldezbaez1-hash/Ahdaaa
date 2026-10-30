@@ -115,6 +115,7 @@ window.runCheck = async (urls: string[]) => {
     const th = await db.thumbs.get(p!.id)
     return { name: p!.fileName, kind: p!.kind, size: `${p!.width}x${p!.height}`, thumb: `${th!.width}x${th!.height}`, thumbBytes: th!.blob.size, asShot: p!.raw?.asShot, meta: p!.meta }
   }))
+  for (const p of recs) await window.saveOutput(`thumb-${p!.fileName}.jpg`, await toBase64((await db.thumbs.get(p!.id))!.blob))
   const byName = (n: string) => recs.find((p) => p!.fileName === n)!.id
 
   // Working images
