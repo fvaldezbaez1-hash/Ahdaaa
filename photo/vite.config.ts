@@ -31,6 +31,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,wasm}'],
+        // On-device AI: models (models/) and the AI runtimes' WebAssembly are fetched only when the
+        // person downloads a model, and kept in Cache Storage by src/ai, not in the app precache.
+        globIgnores: ['models/**', '**/ort-wasm-*.wasm', '**/vision_wasm_*'],
         // The RAW decoder and JPEG encoder are WebAssembly; precache them so editing works offline.
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         cleanupOutdatedCaches: true,
@@ -39,7 +42,7 @@ export default defineConfig({
   ],
   worker: { format: 'es' },
   // These packages load their own workers / .wasm files relative to import.meta.url.
-  optimizeDeps: { exclude: ['libraw-wasm', '@jsquash/jpeg'] },
+  optimizeDeps: { exclude: ['libraw-wasm', '@jsquash/jpeg', 'onnxruntime-web', '@mediapipe/tasks-vision'] },
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1200,

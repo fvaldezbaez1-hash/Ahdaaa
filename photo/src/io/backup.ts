@@ -2,7 +2,9 @@
 // presets — without the originals. Browsers may evict site data (Safari does
 // after weeks without use), so the library offers this file; after re-importing
 // the originals, restoring re-attaches each recipe to the photo with the same
-// file name, size and capture time.
+// file name, size and capture time. Stored AI results (db.rasters) are left
+// out: restored recipes keep their ids, and the editor offers to recompute
+// any it can't find.
 import { defaultRecipe, isUnedited, normalizeRecipe } from '../edit/defaults'
 import { db } from './db'
 import type { AlbumRecord, PhotoRecord, UserPresetRecord } from './types'

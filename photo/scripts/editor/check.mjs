@@ -4,19 +4,21 @@
 // and takes screenshots (desktop 1440×900, phone 390×844, dark and light).
 //
 // Usage (from photo/): node scripts/editor/check.mjs <jpeg dir> <raw file> [screenshot dir] [phase…]
-// Phases: desktop phone states raw masks masksPhone (default: all)
+// Phases: desktop phone states raw masks masksPhone ai aiPhone (default: all), and aiReal
+// (opt-in: the real on-device models from public/models, slow in software).
 import { createServer } from 'vite'
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
+import { installFakeAi } from './fake-ai.mjs'
 const { chromium } = createRequire(import.meta.url)('playwright')
 
 const ROOT = resolve(import.meta.dirname, '../..')
 const ASSETS = resolve(process.argv[2] ?? '.')
 const RAW = process.argv[3] ? resolve(process.argv[3]) : null
 const OUT = resolve(process.argv[4] ?? join(tmpdir(), 'lumen-editor-check'))
-const PHASES = process.argv.slice(5).length ? process.argv.slice(5) : ['desktop', 'phone', 'states', 'raw', 'masks', 'masksPhone']
+const PHASES = process.argv.slice(5).length ? process.argv.slice(5) : ['desktop', 'phone', 'states', 'raw', 'masks', 'masksPhone', 'ai', 'aiPhone']
 const PORT = 5204
 const URL = `http://localhost:${PORT}/`
 mkdirSync(OUT, { recursive: true })
@@ -672,6 +674,272 @@ async function masksPhone() {
   await page.context().close()
 }
 
+/** Wait for the current AI task to finish (or reach a step that needs the person). */
+const aiSettled = (page, timeout = 30000) =>
+  until(page, async () => {
+    const { useAiJob } = await import('/src/editor/ai/jobs.ts')
+    void useAiJob
+    const j = document.querySelector('.ed-ai-card[role="alertdialog"], .ed-ai-card.error')
+    return j ? 'card' : !document.querySelector('.ed-ai-chip, .ed-ai-card[role="status"]') ? 'idle' : null
+  }, undefined, timeout)
+
+const photoDiff = async (page, before) => (await photoPixels(page)) !== before
+
+async function aiPhase() {
+  console.log('ai')
+  const page = await open({ width: 1440, height: 900 })
+  const [id] = await importPhotos(page, ['/__assets/photo-21.jpg', '/__assets/photo-04.jpg'])
+  await page.evaluate(installFakeAi)
+  await openEditor(page, id)
+  const clean = await photoPixels(page)
+
+  // Sky: first use asks to download its model, then detects.
+  await page.keyboard.press('m')
+  await page.getByRole('button', { name: 'Sky', exact: true }).click()
+  await page.waitForSelector('.ed-ai-card[role="alertdialog"]')
+  check(/one-time download of 4\.6 MB/.test(await page.locator('.ed-ai-card').textContent()), 'asks before downloading the model, with its size')
+  await shot(page, 'ai-consent')
+  await page.getByRole('button', { name: 'Download' }).click()
+  await page.waitForSelector('.ed-ai-chip')
+  await shot(page, 'ai-progress')
+  await aiSettled(page)
+  let s = await state(page)
+  let m = selectedMask(s)
+  check(m?.type === 'ai' && m.target === 'sky' && !!m.raster && s.history[0] === 'Sky mask', `sky mask with a stored result ("${s.history[0]}")`)
+  check(await photoDiff(page, clean), 'the engine shows the AI mask (overlay)')
+  await shot(page, 'ai-sky')
+  await dragSlider(page, 'Exposure', -0.12)
+  s = await state(page)
+  check(s.recipe.layers[0].adjust.exposure < 0 && /^Sky: Exposure/.test(s.history[0]), `local adjustment on the sky ("${s.history[0]}")`)
+
+  // People: pick parts.
+  await page.getByRole('button', { name: 'New mask' }).click()
+  await page.getByRole('button', { name: 'People', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'Clothes' }).uncheck()
+  await shot(page, 'ai-people-parts')
+  await page.getByRole('button', { name: 'Select 4 parts' }).click()
+  await page.getByRole('button', { name: 'Download' }).click()
+  await aiSettled(page)
+  s = await state(page)
+  m = selectedMask(s)
+  check(m?.target === 'person' && m.parts?.length === 4 && !m.parts.includes('clothes'), `people mask with parts ${m?.parts}`)
+
+  // Select object: click to add, Alt-click to leave out.
+  await page.getByRole('button', { name: 'New mask' }).click()
+  await page.getByRole('button', { name: 'Select object' }).click()
+  await page.mouse.click(...Object.values(await onPhoto(page, 0.52, 0.45)))
+  await page.getByRole('button', { name: 'Download' }).click()
+  await aiSettled(page)
+  await page.keyboard.down('Alt')
+  await page.mouse.click(...Object.values(await onPhoto(page, 0.55, 0.3)))
+  await page.keyboard.up('Alt')
+  await aiSettled(page)
+  s = await state(page)
+  m = selectedMask(s)
+  check(m?.points?.length === 2 && m.points[0].positive && !m.points[1].positive && !!m.raster, 'object mask from an included and an excluded click')
+  check(s.history[0] === 'Remove from object' && s.history[1] === 'Add to object', `one undo step per click ("${s.history[0]}")`)
+  await shot(page, 'ai-object')
+  await page.keyboard.press('Control+z')
+  check(selectedMask(await state(page)).points.length === 1, 'undo takes back the last click')
+
+  // A result that's missing (e.g. a restored backup) offers Recompute.
+  await page.evaluate(async () => {
+    const { editor } = await import('/src/state/editor.ts')
+    const { view } = await import('/src/editor/view.ts')
+    const r = editor.getState().recipe
+    const sky = r.layers[0]
+    editor.apply((x) => ({ ...x, layers: x.layers.map((l) => (l.id === sky.id ? { ...l, masks: l.masks.map((mm) => ({ ...mm, raster: 'gone' })) } : l)) }), 'simulate restore')
+    view.set({ layer: sky.id, mask: sky.masks[0].id })
+  })
+  await page.waitForSelector('.ed-warn-dot')
+  await shot(page, 'ai-recompute')
+  await page.getByRole('button', { name: 'Recompute' }).click()
+  await aiSettled(page)
+  m = selectedMask(await state(page))
+  check(m.raster && m.raster !== 'gone' && (await page.locator('.ed-masklist .ed-warn-dot').count()) === 0, 'Recompute makes the mask again')
+
+  // Remove: paint, let go, the fill lands as one step.
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Shift+Q')
+  s = await state(page)
+  const before = await photoPixels(page)
+  await drag(page, await onPhoto(page, 0.86, 0.62), await onPhoto(page, 0.92, 0.66), { steps: 8 })
+  await page.getByRole('button', { name: 'Download' }).click()
+  await page.waitForSelector('.ed-ai-chip')
+  await shot(page, 'ai-removing')
+  await aiSettled(page)
+  s = await state(page)
+  const area = s.recipe.retouch.find((t) => t.mode === 'remove')
+  check(!!area?.fill && s.history[0] === 'Remove object', `object removed in one step ("${s.history[0]}")`)
+  check(await photoDiff(page, before), 'the fill shows on the photo')
+  await shot(page, 'ai-removed')
+  await page.keyboard.press('Backspace')
+  check(!(await state(page)).recipe.retouch.some((t) => t.mode === 'remove'), 'Backspace deletes the removal')
+  await page.keyboard.press('Control+z')
+  check((await state(page)).recipe.retouch.some((t) => t.mode === 'remove'), 'undo brings it back')
+
+  // AI Denoise from the Detail panel.
+  await page.keyboard.press('Escape')
+  const detail = page.getByRole('button', { name: 'Detail', exact: true })
+  if ((await detail.getAttribute('aria-expanded')) !== 'true') await detail.click()
+  await page.getByRole('button', { name: 'AI Denoise' }).scrollIntoViewIfNeeded()
+  check(/a few seconds on this device/.test(await page.locator('.ed-denoise').textContent()), 'AI Denoise says how long it takes')
+  await page.getByRole('button', { name: 'AI Denoise' }).click()
+  await page.getByRole('button', { name: 'Download' }).click()
+  await aiSettled(page)
+  s = await state(page)
+  check(s.recipe.denoise?.amount === 50 && !!s.recipe.denoise.raster && s.history[0] === 'AI Denoise', 'AI Denoise blended at 50')
+  check(await page.locator('.ed-badge-ai').isVisible(), '"AI denoised" badge on the photo')
+  await shot(page, 'ai-denoise')
+  await dragSlider(page, 'AI Denoise', 0.2)
+  check((await state(page)).recipe.denoise.amount > 60, 'Amount slider blends more')
+
+  // Persistence and pruning of unused results.
+  await page.waitForTimeout(4600)
+  const saved = await stored(page, id)
+  check(saved.layers.length === 3 && !!saved.denoise?.raster, 'AI masks and denoise saved with the photo')
+  const prunes = await page.evaluate(() => window.__fakeAi.prunes)
+  const keep = prunes.at(-1)?.keep ?? []
+  check(prunes.length > 0 && keep.includes(saved.denoise.raster) && saved.layers.every((l) => l.masks.every((mm) => keep.includes(mm.raster))), `prunes keep every result in use (${prunes.length} prune calls)`)
+
+  // Export with AI upscaling ×2.
+  await page.evaluate(async () => {
+    const { setExportSink } = await import('/src/io/api.ts')
+    window.__exported = []
+    setExportSink({ write: async (f) => void window.__exported.push(f), finish: async () => undefined })
+  })
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Download' }).click()
+  const row = page.locator('.setting-row', { hasText: 'Upscale 2×' })
+  await row.getByText('1,536 × 1,024 px').waitFor({ timeout: 10000 }).catch(() => undefined)
+  check((await row.textContent()).includes('1,536 × 1,024 px'), 'upscale shows the resulting size')
+  await shot(page, 'ai-export')
+  await page.getByRole('dialog').getByRole('button', { name: /^Export/ }).last().click()
+  const size = await until(page, async () => {
+    const f = window.__exported?.[0]
+    if (!f) return null
+    const b = await createImageBitmap(f.blob)
+    return `${b.width}×${b.height}`
+  }, undefined, 60000)
+  check(size === '1536×1024', `exported upscaled ×2 (${size})`)
+
+  // Settings → AI models.
+  await page.evaluate(() => (location.hash = '#/settings'))
+  await page.waitForSelector('#set-models')
+  await page.locator('#set-models').scrollIntoViewIfNeeded()
+  const models = await page.locator('#set-models .set-row').count()
+  check(models >= 6, `Settings lists the downloaded models (${models - 1} + total)`)
+  await shot(page, 'ai-settings')
+  await page.getByRole('button', { name: 'Delete Super Resolution' }).click()
+  await page.waitForTimeout(200)
+  check((await page.locator('#set-models .set-row').count()) === models - 1, 'a model can be deleted')
+  await setTheme(page, 'light')
+  await shot(page, 'ai-settings-light')
+  await page.goBack()
+  await openEditor(page, id)
+  await page.keyboard.press('m')
+  await shot(page, 'ai-masks-light')
+  await setTheme(page, 'dark')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
+/** The real models (served from public/models by the dev server): sky, select object, remove. */
+async function aiReal() {
+  console.log('aiReal')
+  const page = await open({ width: 1440, height: 900 })
+  page.on('console', (m) => /error/i.test(m.type()) && console.log('       console:', m.text().slice(0, 200)))
+  const [id] = await importPhotos(page, ['/__assets/photo-21.jpg'])
+  await openEditor(page, id)
+  const support = await page.evaluate(async () => (await import('/src/ai/index.ts')).aiSupport())
+  console.log(`       backend ${support.backend}, available ${support.available}`)
+  await page.keyboard.press('m')
+  const timed = async (what, fn) => {
+    const t0 = Date.now()
+    await fn()
+    console.log(`       ${what}: ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+  }
+  await page.getByRole('button', { name: 'Sky', exact: true }).click()
+  await timed('sky (download + run)', async () => {
+    await page.getByRole('button', { name: 'Download' }).click()
+    await aiSettled(page, 300000)
+  })
+  let m = selectedMask(await state(page))
+  const sky = await page.evaluate(async (id) => {
+    const img = await (await import('/src/io/rasters.ts')).getRaster(id)
+    if (!img) return null
+    const at = (fx, fy) => img.data[Math.floor(fy * img.height) * img.width + Math.floor(fx * img.width)]
+    return { w: img.width, h: img.height, top: at(0.2, 0.1), rocks: at(0.8, 0.85) }
+  }, m?.raster)
+  check(!!sky && sky.top > 128 && sky.rocks < 128, `real sky mask: sky ${sky?.top}, rocks ${sky?.rocks} (${sky?.w}×${sky?.h})`)
+  await shot(page, 'real-sky')
+
+  await page.getByRole('button', { name: 'New mask' }).click()
+  await page.getByRole('button', { name: 'Select object' }).click()
+  await page.mouse.click(...Object.values(await onPhoto(page, 0.57, 0.5)))
+  await timed('select object (download + run)', async () => {
+    await page.getByRole('button', { name: 'Download' }).click()
+    await aiSettled(page, 300000)
+  })
+  m = selectedMask(await state(page))
+  const obj = await page.evaluate(async (id) => {
+    const img = await (await import('/src/io/rasters.ts')).getRaster(id)
+    if (!img) return null
+    const at = (fx, fy) => img.data[Math.floor(fy * img.height) * img.width + Math.floor(fx * img.width)]
+    return { tower: at(0.57, 0.5), sky: at(0.2, 0.1) }
+  }, m?.raster)
+  check(!!obj && obj.tower > 128 && obj.sky < 128, `real object mask: lighthouse ${obj?.tower}, sky ${obj?.sky}`)
+  await shot(page, 'real-object')
+
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Shift+Q')
+  const before = await photoPixels(page)
+  await drag(page, await onPhoto(page, 0.55, 0.37), await onPhoto(page, 0.58, 0.52), { steps: 10 })
+  await timed('remove (download + run)', async () => {
+    await page.getByRole('button', { name: 'Download' }).click()
+    await aiSettled(page, 300000)
+  })
+  const s = await state(page)
+  check(s.recipe.retouch.some((t) => t.mode === 'remove' && t.fill) && (await photoDiff(page, before)), 'real object removal fills the area')
+  await shot(page, 'real-remove')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
+async function aiPhone() {
+  console.log('aiPhone')
+  const page = await open({ width: 390, height: 844 }, true)
+  const [id] = await importPhotos(page, ['/__assets/photo-21.jpg'])
+  await page.evaluate(installFakeAi)
+  await openEditor(page, id)
+  const tap = (name) => page.getByRole('button', { name, exact: true }).tap()
+  await page.locator('.ed-phone-tools').evaluate((el) => (el.scrollLeft = 400))
+  await tap('Masks')
+  await tap('Subject')
+  await tap('Download')
+  await aiSettled(page)
+  check(selectedMask(await state(page))?.target === 'subject', 'subject mask on the phone')
+  await shot(page, 'phone-ai-subject')
+  await tap('Heal')
+  await tap('Remove')
+  await drag(page, await onPhoto(page, 0.86, 0.62), await onPhoto(page, 0.92, 0.66))
+  await tap('Download')
+  await aiSettled(page)
+  check((await state(page)).recipe.retouch.some((t) => t.mode === 'remove'), 'remove on the phone')
+  check((await page.locator('#ed-panel-title').textContent()) === 'Heal & clone', `the Heal panel stays open (${await page.locator('#ed-panel-title').textContent()})`)
+  await shot(page, 'phone-ai-remove')
+  await tap('Detail')
+  check(/Slow on phones/.test(await page.locator('.ed-denoise').textContent()), 'AI Denoise warns on phones')
+  await shot(page, 'phone-ai-denoise')
+  await setTheme(page, 'light')
+  await tap('AI Denoise')
+  await shot(page, 'phone-ai-denoise-light')
+  await tap('Not now')
+  await setTheme(page, 'dark')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
 try {
   if (PHASES.includes('desktop')) await desktop()
   if (PHASES.includes('phone')) await phone()
@@ -679,6 +947,9 @@ try {
   if (PHASES.includes('raw')) await raw()
   if (PHASES.includes('masks')) await masks()
   if (PHASES.includes('masksPhone')) await masksPhone()
+  if (PHASES.includes('ai')) await aiPhase()
+  if (PHASES.includes('aiPhone')) await aiPhone()
+  if (PHASES.includes('aiReal')) await aiReal()
 } catch (e) {
   failures.push(String(e))
   console.log('ERROR', e)

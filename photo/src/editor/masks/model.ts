@@ -1,4 +1,4 @@
-import type { EditRecipe, LocalAdjust, LocalLayer, Mask, MaskShape } from '../../edit/types'
+import type { AiTarget, EditRecipe, LocalAdjust, LocalLayer, Mask, MaskShape, PersonPart } from '../../edit/types'
 
 // Local adjustment layers and their masks, as pure recipe updates.
 
@@ -12,13 +12,22 @@ export const MASK_KINDS: { kind: MaskKind; label: string; name: string }[] = [
   { kind: 'color', label: 'Color range', name: 'Color' },
 ]
 
-/** Phase 3 (on-device AI): listed in the menu, not available yet. */
-export const AI_KINDS = [
+/** Selections made by on-device AI models. */
+export const AI_KINDS: { target: AiTarget; label: string }[] = [
   { target: 'subject', label: 'Subject' },
   { target: 'sky', label: 'Sky' },
   { target: 'background', label: 'Background' },
   { target: 'person', label: 'People' },
-] as const
+  { target: 'object', label: 'Object' },
+]
+
+export const PERSON_PARTS: { part: PersonPart; label: string }[] = [
+  { part: 'face', label: 'Face' },
+  { part: 'body', label: 'Body skin' },
+  { part: 'hair', label: 'Hair' },
+  { part: 'clothes', label: 'Clothes' },
+  { part: 'accessories', label: 'Accessories' },
+]
 
 export function kindOf(m: MaskShape): MaskKind | 'ai' {
   return m.type === 'range' ? m.range : m.type
@@ -27,6 +36,11 @@ export function kindOf(m: MaskShape): MaskKind | 'ai' {
 export function maskLabel(m: MaskShape): string {
   if (m.type === 'ai') return AI_KINDS.find((a) => a.target === m.target)?.label ?? 'AI'
   return MASK_KINDS.find((k) => k.kind === kindOf(m))!.label
+}
+
+/** What a new layer is called after its first mask ("Radial", "Sky"…). */
+function baseName(m: MaskShape): string {
+  return m.type === 'ai' ? maskLabel(m) : MASK_KINDS.find((k) => k.kind === kindOf(m))!.name
 }
 
 /** "Radial", then "Radial 2", "Radial 3"… */
@@ -38,10 +52,10 @@ export function nextName(layers: LocalLayer[], base: string): string {
   return `${base} ${n}`
 }
 
-export function newLayer(layers: LocalLayer[], kind: MaskKind, shape: MaskShape, ids: { layer: string; mask: string }): LocalLayer {
+export function newLayer(layers: LocalLayer[], shape: MaskShape, ids: { layer: string; mask: string }): LocalLayer {
   return {
     id: ids.layer,
-    name: nextName(layers, MASK_KINDS.find((k) => k.kind === kind)!.name),
+    name: nextName(layers, baseName(shape)),
     enabled: true,
     opacity: 1,
     masks: [{ ...shape, id: ids.mask, mode: 'add', invert: false } as Mask],

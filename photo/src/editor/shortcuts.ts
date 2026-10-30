@@ -5,6 +5,7 @@ import { loadSettings, updateSettings } from '../state/settings'
 import { isTyping } from '../ui/hooks'
 import { toast } from '../ui/toast'
 import { cancelCrop, enterCrop, finishCrop, isCropping, rotateQuick } from './crop/cropTool'
+import { deleteRetouch } from './ai/actions'
 import { deleteMask, deleteSpot, enterHeal, enterMasks, exitTool, nudgeSize } from './masks/modes'
 import { neighbor, openPhoto, type StripItem } from './photos'
 import type { Session } from './session'
@@ -23,6 +24,7 @@ export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: 'M', action: 'Masks' },
   { keys: 'O', action: 'Show the mask overlay' },
   { keys: 'Q', action: 'Heal & clone' },
+  { keys: '⇧Q', action: 'Remove objects (AI)' },
   { keys: 'Alt + paint', action: 'Erase from a brush mask' },
   { keys: 'Space + drag', action: 'Move the photo while masking or healing' },
   { keys: 'Backspace', action: 'Delete the selected heal spot or mask' },
@@ -90,7 +92,7 @@ export function useEditorShortcuts(session: Session | null, order: StripItem[] |
       if (tool && key === 'Enter') return run(exitTool)
       if (tool && (key === '[' || key === ']')) return run(() => nudgeSize(key === ']' ? 1 : -1))
       if (tool && (key === 'Backspace' || key === 'Delete')) {
-        if (v.tool === 'heal' && v.spot) return run(() => deleteSpot(v.spot))
+        if (v.tool === 'heal' && v.spot) return run(() => (v.heal.mode === 'remove' ? deleteRetouch(v.spot!, 'Delete removal') : deleteSpot(v.spot)))
         if (v.tool === 'mask' && v.layer && v.mask) return run(() => deleteMask(v.layer!, v.mask!))
         return
       }
@@ -117,7 +119,9 @@ export function useEditorShortcuts(session: Session | null, order: StripItem[] |
           return run(() => (v.tool === 'mask' ? exitTool() : enterMasks()))
         case 'q':
         case 'Q':
-          return run(() => (v.tool === 'heal' ? exitTool() : enterHeal()))
+          // Shift+Q: AI Remove; Q: heal & clone.
+          if (e.shiftKey) return run(() => (v.tool === 'heal' && v.heal.mode === 'remove' ? exitTool() : enterHeal('remove')))
+          return run(() => (v.tool === 'heal' && v.heal.mode !== 'remove' ? exitTool() : enterHeal(v.heal.mode === 'remove' ? 'heal' : undefined)))
         case 'o':
         case 'O':
           return run(() => view.set({ overlay: !v.overlay }))

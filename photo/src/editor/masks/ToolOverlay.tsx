@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { spotsOf } from '../../edit/retouch'
-import type { Mask, RetouchSpot } from '../../edit/types'
+import type { BrushStroke, Mask, RemoveArea, RetouchSpot } from '../../edit/types'
 import { editor, useEditor } from '../../state/editor'
 import { useSession } from '../session'
 import { toolBus } from '../stage/toolBus'
 import { useView } from '../view'
-import { linearLayout, radialLayout, type Handle } from './handles'
+import { linearLayout, radialLayout, removalPin, type Handle } from './handles'
 import { makeSpace, type Space } from './space'
 import { createHealTool, createMaskTool, type CursorFn } from './tools'
 
@@ -59,6 +59,51 @@ function MaskShapes({ mask, s, out }: { mask: Mask; s: Space; out: { w: number; 
   return null
 }
 
+/** Painted removal strokes as wide round lines (their real width on the photo). */
+function StrokePaths({ strokes, s, className }: { strokes: BrushStroke[]; s: Space; className: string }) {
+  return (
+    <>
+      {strokes.map((st, i) => {
+        const pts = st.points.map((p) => s.toPx(p))
+        const d = pts.map((p, k) => `${k ? 'L' : 'M'}${p.x} ${p.y}`).join('') + (pts.length === 1 ? 'l0.01 0' : '')
+        return <path key={i} d={d} className={className} style={{ strokeWidth: 2 * st.r * s.scale }} />
+      })}
+    </>
+  )
+}
+
+function Removals({ areas, pending, selected, s, out }: { areas: RemoveArea[]; pending: BrushStroke[] | null; selected: string | null; s: Space; out: { w: number; h: number } }) {
+  const sel = areas.find((a) => a.id === selected)
+  return (
+    <>
+      <svg className="ed-mask-svg" viewBox={`0 0 ${out.w} ${out.h}`} preserveAspectRatio="none" aria-hidden="true">
+        {sel && <StrokePaths strokes={sel.strokes} s={s} className="ed-paint selected" />}
+        {pending && <StrokePaths strokes={pending} s={s} className="ed-paint pending" />}
+      </svg>
+      {areas.map((a) => {
+        const p = removalPin(a, s)
+        return <span key={a.id} className={a.id === selected ? 'ed-pin on' : 'ed-pin'} style={{ left: `${(p.x / out.w) * 100}%`, top: `${(p.y / out.h) * 100}%` }} aria-hidden="true" />
+      })}
+    </>
+  )
+}
+
+/** The clicks that shape a Select-object mask: included (+) and left out (−). */
+function ObjectPoints({ mask, s, out }: { mask: Extract<Mask, { type: 'ai' }>; s: Space; out: { w: number; h: number } }) {
+  return (
+    <>
+      {(mask.points ?? []).map((pt, i) => {
+        const p = s.toPx(pt)
+        return (
+          <span key={i} className={pt.positive ? 'ed-pt plus' : 'ed-pt minus'} style={{ left: `${(p.x / out.w) * 100}%`, top: `${(p.y / out.h) * 100}%` }} aria-hidden="true">
+            {pt.positive ? '+' : '−'}
+          </span>
+        )
+      })}
+    </>
+  )
+}
+
 function Spots({ spots, selected, s, out }: { spots: RetouchSpot[]; selected: string | null; s: Space; out: { w: number; h: number } }) {
   return (
     <svg className="ed-mask-svg" viewBox={`0 0 ${out.w} ${out.h}`} preserveAspectRatio="none" aria-hidden="true">
@@ -94,6 +139,9 @@ export function ToolOverlay() {
   const layer = useEditor((s) => s.recipe?.layers.find((l) => l.id === layerId))
   const retouch = useEditor((s) => s.recipe?.retouch)
   const spots = useMemo(() => (retouch ? spotsOf(retouch) : undefined), [retouch])
+  const areas = useMemo(() => (retouch ?? []).filter((t): t is RemoveArea => t.mode === 'remove'), [retouch])
+  const removeMode = useView((s) => s.heal.mode === 'remove')
+  const pending = useView((s) => s.removing)
   const geometry = useEditor((s) => s.recipe?.geometry)
   const ring = useRef<HTMLDivElement>(null)
 
@@ -125,7 +173,9 @@ export function ToolOverlay() {
   return (
     <div className="ed-tool-overlay">
       {tool === 'mask' && mask && layer?.enabled !== false && <MaskShapes mask={mask} s={s} out={out} />}
-      {tool === 'heal' && spots && <Spots spots={spots} selected={spotId} s={s} out={out} />}
+      {tool === 'mask' && mask?.type === 'ai' && mask.target === 'object' && <ObjectPoints mask={mask} s={s} out={out} />}
+      {tool === 'heal' && !removeMode && spots && <Spots spots={spots} selected={spotId} s={s} out={out} />}
+      {tool === 'heal' && removeMode && <Removals areas={areas} pending={pending} selected={spotId} s={s} out={out} />}
       <div ref={ring} className="ed-ring" style={{ display: 'none' } as CSSProperties} aria-hidden="true">
         <span />
       </div>

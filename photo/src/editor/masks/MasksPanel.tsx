@@ -3,6 +3,8 @@ import { editor, useEditor } from '../../state/editor'
 import { Icon } from '../../ui/Icon'
 import { useSession } from '../session'
 import { useView } from '../view'
+import { createAiMask, createObjectMask } from '../ai/actions'
+import { AiJobCard } from '../ai/AiJobCard'
 import { KindChooser } from './KindChooser'
 import { LayerList } from './LayerList'
 import { LocalSliders } from './LocalSliders'
@@ -11,7 +13,8 @@ import { isAdjusted, updateLayer } from './model'
 import { createLayer, enterMasks, exitTool } from './modes'
 
 function NewMask({ open: initial = false }: { open?: boolean }) {
-  const { record } = useSession()
+  const session = useSession()
+  const { record } = session
   const [open, setOpen] = useState(initial)
   if (!open)
     return (
@@ -33,6 +36,11 @@ function NewMask({ open: initial = false }: { open?: boolean }) {
         onPick={(k) => {
           setOpen(false)
           createLayer(k, { width: record.width, height: record.height })
+        }}
+        onPickAi={(target, parts) => {
+          setOpen(false)
+          if (target === 'object') createObjectMask()
+          else void createAiMask(session, target, { parts })
         }}
       />
     </div>
@@ -68,6 +76,7 @@ export function MasksPanel({ layout }: { layout: 'side' | 'strip' }) {
           </button>
         </div>
       )}
+      <AiJobCard scope="mask" />
       {count === 0 && <p className="muted small">Masks apply adjustments to part of the photo. Choose how to select it:</p>}
       <LayerList />
       <NewMask key={count} open={count === 0} />

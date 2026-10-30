@@ -2,6 +2,7 @@
 // (the editor has its own on-screen one). Created on first use, released when
 // idle so its GPU memory doesn't linger.
 import type { EditRecipe } from '../edit/types'
+import { rastersFor } from '../editor/ai/core'
 import { createEngine } from '../engine'
 import type { Engine, ExportRenderOptions, RenderedImage } from '../engine/types'
 import type { DecodedPhoto, ThumbRecord } from './types'
@@ -40,12 +41,12 @@ function release() {
   }, IDLE_MS)
 }
 
-/** Render a recipe off-screen. Throws when this device can't render (no WebGL 2). */
+/** Render a recipe off-screen, with the AI results it refers to. Throws when this device can't render (no WebGL 2). */
 export async function renderPhoto(recipe: EditRecipe, d: DecodedPhoto, opts: ExportRenderOptions): Promise<RenderedImage> {
   const e = acquire()
   if (!e) throw new Error("This device can't render photos: WebGL 2 isn't available.")
   try {
-    return await e.renderImage(recipe, d.image, d.color, opts)
+    return await e.renderImage(recipe, d.image, d.color, { ...opts, rasters: opts.rasters ?? (await rastersFor(recipe)) })
   } finally {
     release()
   }

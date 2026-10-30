@@ -1,4 +1,5 @@
 import { Dexie, type EntityTable } from 'dexie'
+import type { RasterRecord } from './rasters'
 import type { AlbumRecord, KV, OriginalRecord, PhotoRecord, ThumbRecord, UserPresetRecord } from './types'
 
 // Everything lives in IndexedDB on the device. Originals are stored once and
@@ -11,6 +12,8 @@ export class LumenDB extends Dexie {
   albums!: EntityTable<AlbumRecord, 'id'>
   presets!: EntityTable<UserPresetRecord, 'id'>
   kv!: EntityTable<KV, 'key'>
+  /** Phase 3: stored AI results (masks, removal fills, denoised sources), see rasters.ts. */
+  rasters!: EntityTable<RasterRecord, 'id'>
 
   constructor(name = 'lumen') {
     super(name)
@@ -22,6 +25,8 @@ export class LumenDB extends Dexie {
       presets: 'id, createdAt, source, collection',
       kv: 'key',
     })
+    // Phase 3: AI results. A new table only; existing data is untouched.
+    this.version(2).stores({ rasters: 'id, photoId' })
   }
 }
 
