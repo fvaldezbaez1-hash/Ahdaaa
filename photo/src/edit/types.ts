@@ -162,6 +162,9 @@ export interface LocalLayer {
 
 export type Variation = 'original' | 'warmer' | 'cooler' | 'softer' | 'stronger'
 
+/** A recipe value a look changed, keyed by its path (see edit/path.ts). */
+export type LookValue = number | string | CurvePoint[]
+
 /** Which preset (look) produced the current settings, for the UI. */
 export interface AppliedLook {
   presetId: string
@@ -169,6 +172,13 @@ export interface AppliedLook {
   /** 0…200 (%). */
   amount: number
   variation: Variation
+  /**
+   * Values of every field the look changed, from before it was applied, so a
+   * new amount, variation or look starts from the photo as it was (no stacking).
+   */
+  base?: Record<string, LookValue>
+  /** What the look set those fields to; a field edited since keeps the user's change. */
+  set?: Record<string, LookValue>
 }
 
 export interface EditRecipe {

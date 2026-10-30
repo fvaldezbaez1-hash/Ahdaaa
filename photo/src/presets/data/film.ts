@@ -1,0 +1,83 @@
+import { lin, look, pts, tc, w, type CollectionDef } from './kit'
+
+export const film: CollectionDef = {
+  id: 'film',
+  name: 'Film',
+  description: 'Color film character: grain, gentle highlight roll-off and lifted blacks.',
+  looks: [
+    look('warm-400', 'Warm 400', 'Warm, forgiving color-negative feel with creamy highlights and fine grain.', ['film', 'warm', 'portrait', 'grain'], {
+      wbShift: { temp: 8, tint: 2 },
+      basic: { contrast: -6, highlights: -18, shadows: 10, vibrance: 4, saturation: -4 },
+      curve: { rgb: tc(0.04, 0.01, 0.03) },
+      mixer: { hue: { green: -10 }, sat: { green: -15, blue: -8 }, lum: { orange: 4 } },
+      grading: { shadows: w(195, 8), highlights: w(40, 8) },
+      effects: { grain: 16 },
+    }),
+    look('vivid-100', 'Vivid 100', 'Saturated slide-style color with clean whites and a fine grain.', ['film', 'vivid', 'saturated', 'landscape'], {
+      basic: { contrast: 18, blacks: -10, vibrance: 18, saturation: 6 },
+      curve: { rgb: tc(0, 0.04, 0, -0.01) },
+      mixer: { sat: { blue: 12, green: 8, red: 6 } },
+      grading: { shadows: w(220, 6) },
+      effects: { grain: 6 },
+    }),
+    look('pastel-400', 'Pastel 400', 'Bright, pastel color like generously exposed negative film.', ['film', 'pastel', 'bright', 'soft'], {
+      wbShift: { temp: 4, tint: 4 },
+      basic: { exposure: 0.1, contrast: -14, highlights: -25, shadows: 18, saturation: -14 },
+      curve: { rgb: tc(0.06, 0, 0.04, 0.03) },
+      mixer: { hue: { green: -8 }, sat: { green: -20 }, lum: { blue: 10 } },
+      grading: { highlights: w(20, 6) },
+      effects: { grain: 14 },
+    }),
+    look('tungsten-800', 'Tungsten 800', 'Cool, cinematic night film: cyan shadows and warm practical lights.', ['film', 'night', 'cool', 'cinematic', 'grain'], {
+      wbShift: { temp: -18, tint: 4 },
+      basic: { contrast: 8 },
+      curve: { rgb: tc(0.03, 0.02, 0.02) },
+      mixer: { sat: { orange: 6 } },
+      grading: { shadows: w(190, 14), highlights: w(30, 6) },
+      effects: { grain: 26, vignette: -12 },
+    }),
+    look('muted-slide', 'Muted Slide', 'Restrained color with deep reds and firm contrast — reportage on slide film.', ['film', 'muted', 'documentary', 'street'], {
+      basic: { contrast: 14, blacks: -8, saturation: -14 },
+      curve: { rgb: tc(0, 0.03) },
+      mixer: { sat: { red: 6, blue: -10 }, lum: { red: -6 } },
+      grading: { shadows: w(200, 6) },
+      effects: { grain: 10 },
+    }),
+    look('honey-200', 'Honey 200', 'Sunny consumer-film warmth with golden yellows.', ['film', 'warm', 'nostalgic', 'summer'], {
+      wbShift: { temp: 10, tint: -2 },
+      basic: { contrast: 8, vibrance: 8 },
+      curve: { rgb: tc(0.03, 0.02, 0.02) },
+      mixer: { hue: { green: -8 }, sat: { yellow: 10, orange: 4 } },
+      grading: { highlights: w(48, 10) },
+      effects: { grain: 14 },
+    }),
+    look('slide-50', 'Slide 50', 'Deep blacks, dense blues and greens, almost no grain.', ['film', 'vivid', 'contrast', 'landscape'], {
+      wbShift: { temp: -3, tint: 0 },
+      basic: { contrast: 22, highlights: -10, blacks: -14, vibrance: 22, saturation: 8 },
+      curve: { rgb: tc(0, 0.045, 0.01) },
+      mixer: { sat: { blue: 14, green: 14, red: 8 }, lum: { blue: -10, green: -6 } },
+      effects: { grain: 4, vignette: -8 },
+    }),
+    look('cine-500', 'Cine 500', 'Wide-latitude motion-picture negative: soft contrast, teal shadows, warm skin.', ['film', 'cinematic', 'soft', 'grain'], {
+      basic: { contrast: -10, highlights: -30, shadows: 20, saturation: -6 },
+      curve: { rgb: tc(0.05, 0.015, 0.03) },
+      mixer: { hue: { orange: -3 }, sat: { blue: -10 } },
+      grading: { shadows: w(185, 10), highlights: w(35, 8) },
+      effects: { grain: 18 },
+    }),
+    look('expired', 'Expired', 'Drifting color, faded blacks and heavy grain from a roll left too long.', ['film', 'vintage', 'faded', 'grain', 'lo-fi'], {
+      wbShift: { temp: 6, tint: 8 },
+      basic: { contrast: -8, saturation: -10 },
+      curve: { rgb: tc(0.08, 0.02, 0.05), r: lin(0.02, 0.98), g: pts(0, 0.03, 0.5, 0.5, 1, 0.95), b: pts(0, 0.07, 0.5, 0.48, 1, 0.9) },
+      grading: { highlights: w(60, 10) },
+      effects: { grain: 30, vignette: -14 },
+    }),
+    look('instant', 'Instant', 'Soft instant-print color: cool green shadows, creamy highlights and a dark edge.', ['film', 'instant', 'vintage', 'soft'], {
+      basic: { exposure: 0.08, contrast: -12, highlights: -20, saturation: -8 },
+      curve: { rgb: tc(0.07, 0.02, 0.06) },
+      mixer: { sat: { blue: -14 } },
+      grading: { shadows: w(170, 14), highlights: w(45, 12) },
+      effects: { grain: 10, vignette: -18 },
+    }),
+  ],
+}
