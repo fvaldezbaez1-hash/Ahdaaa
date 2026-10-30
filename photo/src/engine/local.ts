@@ -5,7 +5,7 @@
 import type { LocalLayer, Mask } from '../edit/types'
 import { applyAffine, invertAffine, type Affine, type Size } from './geometry'
 import type { Gpu, Target } from './gl'
-import { LOCAL, MASK, SEGMENT_FRAG, SEGMENT_VERT, STROKE } from './localShaders'
+import { LAYERS_PER_PASS, LOCAL, MASK, SEGMENT_FRAG, SEGMENT_VERT, STROKE } from './localShaders'
 import { drawableMasks, layerVector } from './masks'
 import type { Rect, StageCache } from './pipeline'
 
@@ -128,12 +128,16 @@ export function localParams(gpu: Gpu, cache: StageCache, layers: LocalLayer[], m
   const vectors = layers.map((l) => layerVector(l.adjust, Math.min(1, l.opacity)))
   const key = JSON.stringify([layers.map((l) => masks.get(l.id)!.version), vectors.map((v) => Array.from(v))])
   return cache.runMulti('local', key, W, H, 4, (fbo) => {
-    gpu.clearMulti(fbo, W, H, 4)
-    gpu.blend('add')
-    layers.forEach((l, i) => {
-      gpu.program('local', LOCAL).tex('u_mask', masks.get(l.id)!.target, 0).v4a('u_v', vectors[i])
+    // 8 layers per pass; further passes add on top.
+    for (let c = 0; c < layers.length; c += LAYERS_PER_PASS) {
+      const chunk = layers.slice(c, c + LAYERS_PER_PASS)
+      const v = new Float32Array(LAYERS_PER_PASS * 16)
+      chunk.forEach((_, i) => v.set(vectors[c + i], i * 16))
+      const p = gpu.program('local', LOCAL).i('u_n', chunk.length).v4a('u_v', v)
+      for (let i = 0; i < LAYERS_PER_PASS; i++) p.tex('u_m' + i, chunk[i] ? masks.get(chunk[i].id)!.target : gpu.dummy(), i)
+      gpu.blend(c ? 'add' : 'none')
       gpu.drawMulti(fbo, W, H)
-    })
+    }
     gpu.blend('none')
   })
 }

@@ -316,13 +316,6 @@ export class Gpu {
     return this.dummyTex
   }
 
-  clearMulti(fbo: WebGLFramebuffer, width: number, height: number, count: number) {
-    const gl = this.gl
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
-    gl.viewport(0, 0, width, height)
-    for (let i = 0; i < count; i++) gl.clearBufferfv(gl.COLOR, i, [0, 0, 0, 0])
-  }
-
   clear(target: Target, r = 0, g = 0, b = 0, a = 0) {
     const gl = this.gl
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo)

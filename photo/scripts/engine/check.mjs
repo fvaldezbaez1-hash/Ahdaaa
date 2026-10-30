@@ -94,7 +94,7 @@ const LAYERS = [
   { id: 'dodge', name: 'Dodge bridge', enabled: true, opacity: 1, adjust: { exposure: 0.8, shadows: 40, clarity: 30 },
     masks: [mask('b1', { type: 'brush', strokes: [
       { points: [0.2, 0.25, 0.3, 0.35, 0.42, 0.5, 0.6].map((x) => ({ x, y: 0.62 - 0.55 * (x - 0.2) * (0.62 - x) * 2.2 })), r: 0.025, feather: 60, flow: 0.8 },
-      { points: [{ x: 0.42, y: 0.5 }, { x: 0.47, y: 0.5 }], r: 0.015, feather: 40, flow: 1, erase: true },
+      { points: [{ x: 0.445, y: 0.54 }, { x: 0.445, y: 0.6 }], r: 0.012, feather: 20, flow: 1, erase: true },
     ] })] },
   { id: 'low', name: 'Lift dark water', enabled: true, opacity: 0.8, adjust: { shadows: 50, color: { hue: 30, sat: 30 }, whites: 10, blacks: -10 },
     masks: [mask('r1', { type: 'range', range: 'luminance', low: 0, high: 30, smooth: 40 }), mask('l1', { type: 'linear', x1: 0.5, y1: 1, x2: 0.5, y2: 0.6 }, 'intersect')] },
@@ -104,7 +104,7 @@ const LAYERS = [
     masks: [mask('s1', { type: 'radial', cx: 0.5, cy: 0.5, rx: 0.45, ry: 0.32, angle: 0, feather: 60 }, 'add', true)] },
 ]
 const SPOTS = [
-  { id: 'h1', mode: 'heal', x: 0.414, y: 0.713, r: 0.007, sx: 0.44, sy: 0.735, feather: 50, opacity: 1 },
+  { id: 'h1', mode: 'heal', x: 0.414, y: 0.714, r: 0.013, sx: 0.37, sy: 0.74, feather: 30, opacity: 1 },
   // A clone from far away: in the tiled export the source lies in another tile.
   { id: 'c1', mode: 'clone', x: 0.12, y: 0.2, r: 0.02, sx: 0.8, sy: 0.85, feather: 30, opacity: 1 },
 ]
@@ -117,9 +117,10 @@ if (want('local')) {
   ok(b.maxDiff <= 2 && b.meanDiff < 0.6, 'masks + spots: 100 % view == export', b)
   const c = await lab('tiling', 'arw', LOCAL)
   ok(c.maxDiff16 <= 320 && c.meanDiff16 < 0.5, 'masks + spots: tiled export == single tile (16-bit)', c)
-  const h = await lab('healCheck', 'arw', 0.414, 0.713, 0.007)
+  const h = await lab('healCheck', 'arw', 0.414, 0.714, 0.013)
   save('heal-duck', h.png)
-  ok(Math.abs(h.after.inside - h.after.ring) < Math.abs(h.before.inside - h.before.ring) * 0.5, 'heal spot removes a small feature', { ...h, png: undefined })
+  // The feature's texture is gone (spread back to water level) and the brightness matches the surroundings.
+  ok(h.after.std < h.before.std * 0.5 && Math.abs(h.after.inside - h.after.ring) < 8, 'heal spot removes a small feature', { ...h, png: undefined })
   const t = await lab('timing', 'arw', 1600, 1000, LOCAL)
   console.log('timing with 5 layers + 2 spots (SwiftShader, 1600×1000)', JSON.stringify(t))
 }

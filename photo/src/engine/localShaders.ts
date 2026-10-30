@@ -101,20 +101,28 @@ uniform sampler2D u_stroke;
 uniform float u_flow;
 void main() { outColor = vec4(texelFetch(u_stroke, ivec2(gl_FragCoord.xy), 0).r * u_flow); }`
 
-/** One layer's contribution (mask × its 16 numbers) added into the 4 local-parameter targets. */
+/** Layers handled per LOCAL pass (more are added with blending). */
+export const LAYERS_PER_PASS = 8
+
+/** Up to 8 layers' contributions (mask × their 16 numbers) summed into the 4 local-parameter targets. */
 export const LOCAL = () => `${PRELUDE}
 layout(location = 0) out vec4 o0;
 layout(location = 1) out vec4 o1;
 layout(location = 2) out vec4 o2;
 layout(location = 3) out vec4 o3;
-uniform sampler2D u_mask;
-uniform vec4 u_v[4];
+${Array.from({ length: LAYERS_PER_PASS }, (_, i) => `uniform sampler2D u_m${i};`).join('\n')}
+uniform vec4 u_v[${LAYERS_PER_PASS * 4}];
+uniform int u_n;
+void add(float m, int i) {
+  o0 += u_v[i * 4] * m;
+  o1 += u_v[i * 4 + 1] * m;
+  o2 += u_v[i * 4 + 2] * m;
+  o3 += u_v[i * 4 + 3] * m;
+}
 void main() {
-  float m = texelFetch(u_mask, ivec2(gl_FragCoord.xy), 0).r;
-  o0 = u_v[0] * m;
-  o1 = u_v[1] * m;
-  o2 = u_v[2] * m;
-  o3 = u_v[3] * m;
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  o0 = o1 = o2 = o3 = vec4(0.0);
+${Array.from({ length: LAYERS_PER_PASS }, (_, i) => `  if (u_n > ${i}) add(texelFetch(u_m${i}, p, 0).r, ${i});`).join('\n')}
 }`
 
 export const RING_SAMPLES = 32

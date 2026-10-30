@@ -331,7 +331,7 @@ async function healCheck(name, x, y, r) {
   engine.setSource(p.image, p.color)
   const base = recipeFor(name)
   const src = engine.findHealSource(base, x, y, r)
-  const spot = { id: 'h1', mode: 'heal', x, y, r, sx: src.sx, sy: src.sy, feather: 50, opacity: 1 }
+  const spot = { id: 'h1', mode: 'heal', x, y, r, sx: src.sx, sy: src.sy, feather: 30, opacity: 1 }
   const a = await engine.renderImage(base, p.image, p.color, { bitDepth: 8, colorSpace: 'srgb' })
   const b = await engine.renderImage({ ...base, retouch: [spot] }, p.image, p.color, { bitDepth: 8, colorSpace: 'srgb' })
   const W = a.width, L = Math.max(W, a.height), cx = x * W, cy = y * a.height, R = r * L
