@@ -163,7 +163,7 @@ export type MaskShape =
    * luminance: low/high 0…100 (display-encoded), smooth 0…100 = feathering of both ends.
    * color: hue 0…360 and sat 0…100 of the sampled color, `low…high` = tolerance 0…100 (high used as the width), smooth 0…100.
    */
-  | { type: 'range'; mode: 'luminance' | 'color'; low: number; high: number; smooth: number; hue?: number; sat?: number }
+  | { type: 'range'; range: 'luminance' | 'color'; low: number; high: number; smooth: number; hue?: number; sat?: number }
 
 /** How a mask combines with the ones before it in the layer (the first one is always `add`). */
 export type MaskMode = 'add' | 'subtract' | 'intersect'
