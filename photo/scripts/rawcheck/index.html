@@ -1,0 +1,22 @@
+<!doctype html>
+<html><body><script type="module">
+import LibRaw from 'libraw-wasm';
+window.run = async (url, settings) => {
+  const t0 = performance.now();
+  const buf = new Uint8Array(await (await fetch(url)).arrayBuffer());
+  const raw = new LibRaw();
+  await raw.open(buf, settings);
+  const t1 = performance.now();
+  const meta = await raw.metadata(true);
+  const img = await raw.imageData();
+  const t2 = performance.now();
+  let max = 0, sum = 0; const d = img.data;
+  for (let i = 0; i < d.length; i += 97) { if (d[i] > max) max = d[i]; sum += d[i]; }
+  raw.dispose();
+  const c = meta.color_data || {};
+  return { isolated: crossOriginIsolated, openMs: Math.round(t1 - t0), imageMs: Math.round(t2 - t1), w: img.width, h: img.height, colors: img.colors, bits: img.bits, type: d.constructor.name, max, mean: Math.round(sum / (d.length / 97)),
+    make: meta.camera_make, model: meta.camera_model, iso: meta.iso_speed, shutter: meta.shutter, aperture: meta.aperture, focal: meta.focal_len, flip: meta.flip, lens: meta.lens && meta.lens.Lens,
+    cam_mul: c.cam_mul, pre_mul: c.pre_mul, maximum: c.maximum, black: c.black, rgb_cam: c.rgb_cam, cam_xyz: c.cam_xyz, thumb: [meta.thumb_width, meta.thumb_height, meta.thumb_format] };
+};
+window.ready = true;
+</script></body></html>

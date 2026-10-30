@@ -35,6 +35,9 @@ export default defineConfig({
         // The barcode reader's WebAssembly is ~1 MB; precache it so scanning works offline.
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         cleanupOutdatedCaches: true,
+        // Lumen (the photo editor) is served from ./photo/ on the same site with
+        // its own service worker; don't answer its pages with Forge's app shell.
+        navigateFallbackDenylist: [/\/photo\//],
       },
     }),
   ],

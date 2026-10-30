@@ -1,0 +1,600 @@
+/* ==========================================================================
+   Lumen AI: the assistant panel (editor) and its settings section.
+   ========================================================================== */
+
+.ai {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+}
+
+/* ---------- Header ---------- */
+.ai-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 10px 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.ai-badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.ai-badge.lg {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+.ai-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.ai-sub {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+.ai-provider select {
+  height: 30px;
+  max-width: 150px;
+  padding: 0 26px 0 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background-color: var(--panel-2);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  appearance: none;
+  font-size: 12px;
+  outline: none;
+}
+.ai-provider select:focus-visible {
+  border-color: var(--accent);
+}
+.ai.is-phone .ai-head {
+  min-height: 60px;
+  padding: 6px 12px 6px 6px;
+  gap: 6px;
+  border-bottom: 0;
+}
+.ai.is-phone .ai-badge {
+  width: auto;
+  height: auto;
+  background: none;
+}
+.ai.is-phone .ai-title {
+  font-size: 18px;
+}
+.ai.is-phone .ai-provider select {
+  height: 36px;
+  font-size: 13px;
+}
+
+.ai-center {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+/* ---------- Phone: the photo above the conversation ---------- */
+.ai-peek {
+  position: relative;
+  flex: none;
+  height: min(32dvh, 280px);
+  display: grid;
+  place-items: center;
+  background: var(--stage);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.ai-peek img {
+  display: block;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 16px);
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+.ai-peek-tag {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+/* ---------- Conversation ---------- */
+.ai-log {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+.ai.is-phone .ai-log {
+  gap: 12px;
+  font-size: 14px;
+}
+.ai-user {
+  align-self: flex-end;
+  max-width: 86%;
+  padding: 9px 12px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 500;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-bot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ai-text {
+  color: var(--text);
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.ai-typing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.ai-dots {
+  display: flex;
+  gap: 4px;
+}
+.ai-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: ai-dot 1.2s infinite;
+}
+.ai-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.ai-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes ai-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+.ai-meta {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+/* ---------- Change card ---------- */
+.ai-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+}
+.ai-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 650;
+}
+.ai-scope i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.ai-changes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ai-changes li {
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ai-ch-label {
+  color: var(--text-2);
+}
+.ai-ch-from {
+  color: var(--text-3);
+}
+.ai-ch-to {
+  color: var(--text);
+  font-weight: 600;
+}
+.ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ai-why-btn {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ai-why-btn:hover {
+  background: var(--accent-soft);
+}
+.ai-why {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ai.is-phone .ai-actions .btn {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.ai.is-phone .ai-why-btn {
+  height: 34px;
+  font-size: 13px;
+}
+
+.ai-error {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line));
+  background: color-mix(in srgb, var(--danger) 7%, var(--panel));
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.ai-error > .icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--danger);
+}
+
+/* ---------- Footer: suggestions, input, privacy ---------- */
+.ai-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--line);
+}
+.ai-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ai-chips .chip {
+  background: transparent;
+}
+.ai.is-phone .ai-foot {
+  padding: 10px 12px 12px;
+}
+.ai.is-phone .ai-chips {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin: 0 -12px;
+  padding: 0 12px;
+}
+.ai.is-phone .ai-chips .chip {
+  flex: none;
+  height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.ai-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+}
+.ai-input:focus-within {
+  border-color: var(--accent);
+}
+.ai-input label {
+  display: flex;
+}
+.ai-input textarea {
+  width: 100%;
+  min-height: 34px;
+  max-height: 120px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  resize: none;
+  line-height: 18px;
+}
+.ai-icon,
+.ai-send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+.ai-icon {
+  color: var(--text-2);
+}
+.ai-icon:hover,
+.ai-icon.on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.ai-send {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.ai-send.stop {
+  background: var(--panel-3);
+}
+.ai-send.stop span {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--text);
+}
+.ai.is-phone .ai-input {
+  padding-left: 14px;
+  border-radius: 14px;
+}
+.ai.is-phone .ai-input textarea {
+  min-height: 40px;
+  padding: 10px 0;
+  font-size: 16px; /* stops iOS zooming on focus */
+  line-height: 20px;
+}
+.ai.is-phone .ai-icon,
+.ai.is-phone .ai-send {
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+}
+.ai-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.ai-note .icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* ---------- Not set up ---------- */
+.ai-setup {
+  flex: 1;
+  min-height: 0;
+  padding: 20px 16px;
+}
+.ai-setup-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 420px;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+.ai-setup-card h3 {
+  font-size: 17px;
+  font-weight: 700;
+}
+.ai-setup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+}
+.ai-setup-list li {
+  display: flex;
+  gap: 8px;
+}
+.ai-setup-list .icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent-text);
+}
+.ai-privacy {
+  display: flex;
+  gap: 7px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.ai-privacy .icon {
+  flex: none;
+  margin-top: 2px;
+}
+.ai-setup-card .btn.lg,
+.ai-setup-card .btn.block {
+  height: 40px;
+  margin-top: 4px;
+}
+
+/* ---------- Settings section ---------- */
+.ai-set {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ai-set hr {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.ai-set-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ai-set-row b {
+  display: block;
+  font-weight: 600;
+}
+.ai-set-row small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.ai-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-key-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+}
+.ai-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ai-key .input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ai-key-actions {
+  gap: 6px 10px;
+}
+.ai-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+.ai-status {
+  min-height: 1.4em;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+.ai-status.good {
+  color: var(--good);
+  font-weight: 600;
+}
+.ai-status.bad {
+  color: var(--danger);
+}
+.ai-set-warning {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ai-set-warning .icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent-text);
+}
+.ai-set-warning b {
+  color: var(--text);
+}
+.ai-adv summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ai-adv[open] summary {
+  margin-bottom: 10px;
+}
+.ai-set-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ai-set-notes li {
+  display: flex;
+  gap: 8px;
+}
+.ai-set-notes .icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-dots i {
+    animation: none;
+    opacity: 0.7;
+  }
+}
