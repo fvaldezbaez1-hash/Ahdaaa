@@ -398,6 +398,20 @@ async function raw() {
   await page.mouse.up()
   console.log(`       30 slider moves in ${Date.now() - t2} ms (software GL)`)
   await shot(page, 'raw-desktop')
+  // True 100 %: the visible window comes from the full-resolution decode, one photo pixel per canvas pixel.
+  await page.evaluate(async () => (await import('/src/editor/stage/stageView.ts')).stageControl.toggleZoom())
+  const t3 = Date.now()
+  const region = await until(page, () => {
+    const c = document.querySelector('.ed-photo canvas')
+    return c.style.position === 'absolute' && { w: c.width, h: c.height, cssW: parseFloat(c.style.width), cssH: parseFloat(c.style.height) }
+  }, undefined, 180000)
+  console.log(`       100 % (full resolution) in ${Date.now() - t3} ms`)
+  check(region.w <= 1440 && region.h <= 900 && Math.abs(region.cssW - region.w) < 1, `100 % shows a 1:1 window ${region.w}×${region.h}`)
+  await page.waitForTimeout(300)
+  await shot(page, 'raw-100')
+  await page.evaluate(async () => (await import('/src/editor/stage/stageView.ts')).stageControl.fit())
+  await until(page, () => document.querySelector('.ed-photo canvas').style.position === '')
+  check(true, 'Fit leaves the 100 % window')
   check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
   await page.context().close()
 }

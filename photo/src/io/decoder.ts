@@ -28,7 +28,13 @@ export const NOTICE_RAW_UNSUPPORTED = "Lumen can't develop this camera's RAW fil
 const HEIC_MESSAGE = "This browser can't open HEIC photos. Open Lumen in Safari, or export the photos as JPEG first."
 
 export async function decodeBlob(blob: Blob, req: DecodeRequest): Promise<DecodedPhoto> {
-  if (isRawName(req.fileName)) return decodeRaw(blob, req)
+  const d = isRawName(req.fileName) ? await decodeRaw(blob, req) : await decodeImage(blob, req)
+  // Lets the engine size pixel-based effects (sharpening, noise reduction, grain) as in the full-size export.
+  if (d.image.width < d.fullWidth) d.image.fullWidth = d.fullWidth
+  return d
+}
+
+async function decodeImage(blob: Blob, req: DecodeRequest): Promise<DecodedPhoto> {
   const args = { blob, maxLongEdge: req.maxLongEdge, maxPixels: maxDecodePixels() }
   const ext = extOf(req.fileName)
   let d

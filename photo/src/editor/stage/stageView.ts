@@ -1,4 +1,5 @@
-import type { Engine } from '../../engine/types'
+import type { EditRecipe } from '../../edit/types'
+import type { Engine, SourceImage } from '../../engine/types'
 import { editor } from '../../state/editor'
 import { view, type ViewState } from '../view'
 
@@ -40,16 +41,23 @@ export class StageView {
   private zoomedAt = 0
   private key = ''
   private unsubs: (() => void)[] = []
+  /** Full-resolution pixels for true 100 %, loaded the first time it's needed. */
+  private full: 'idle' | 'loading' | 'ready' | 'failed' = 'idle'
+  private abort = new AbortController()
+  /** The canvas shows only the visible window of the full-resolution result. */
+  private region = false
 
   private engine: Engine
   private photoEl: HTMLElement
   /** Full-resolution pixels per working pixel. */
   private fullScale: number
+  private loadFull: ((signal: AbortSignal) => Promise<SourceImage>) | undefined
 
-  constructor(engine: Engine, photoEl: HTMLElement, fullScale: number) {
+  constructor(engine: Engine, photoEl: HTMLElement, fullScale: number, loadFull?: (signal: AbortSignal) => Promise<SourceImage>) {
     this.engine = engine
     this.photoEl = photoEl
     this.fullScale = fullScale
+    this.loadFull = loadFull
     let recipe = editor.getState().recipe
     this.key = renderKey(view.get())
     this.unsubs.push(
@@ -164,6 +172,8 @@ export class StageView {
     st.height = `${h}px`
     st.transform = `translate3d(${x}px, ${y}px, 0)`
 
+    if (this.regionFrame(r, v, dpr)) return
+    if (this.region) this.leaveRegion()
     // Device pixels, but no more than the working image has and within the budget.
     const bw = w * dpr, bh = h * dpr
     const k = Math.min(1, Math.sqrt(PIXEL_BUDGET / (bw * bh)), out.width / bw)
@@ -181,6 +191,66 @@ export class StageView {
     if (!v.holding && v.mode === 'after' && !cropping) this.scheduleHistogram()
   }
 
+  /**
+   * True 100 %: at one photo pixel per device pixel or closer, draw just the
+   * visible part of the photo from the full-resolution source, 1:1, and let
+   * CSS scale it past 100 %. Not in split view, whose divider spans the whole photo.
+   */
+  private regionFrame(r: EditRecipe, v: ViewState, dpr: number): boolean {
+    const e = this.engine
+    if (!e.renderRegion || !e.regionOutputSize || !e.setFullSource || !this.loadFull || this.fullScale < 1.01) return false
+    if (v.tool === 'crop' || v.mode === 'split' || v.zoom < v.zoom100 * 0.999) return false
+    if (this.full !== 'ready') {
+      this.requestFull()
+      return false
+    }
+    const out = e.regionOutputSize(r)
+    const b = this.box
+    const s = (b.w * dpr) / out.width // device pixels per photo pixel
+    if (s < 0.999) return false
+    const x0 = Math.max(0, b.x), y0 = Math.max(0, b.y)
+    const x1 = Math.min(this.stageW, b.x + b.w), y1 = Math.min(this.stageH, b.y + b.h)
+    if (x1 <= x0 || y1 <= y0) return true
+    const fx = Math.max(0, Math.floor(((x0 - b.x) * dpr) / s)), fy = Math.max(0, Math.floor(((y0 - b.y) * dpr) / s))
+    const fw = Math.max(1, Math.min(out.width - fx, Math.ceil(((x1 - b.x) * dpr) / s) - fx))
+    const fh = Math.max(1, Math.min(out.height - fy, Math.ceil(((y1 - b.y) * dpr) / s) - fy))
+    const canvas = e.canvas as HTMLCanvasElement
+    if (canvas.width !== fw || canvas.height !== fh) e.resize(fw, fh)
+    const k = s / dpr // CSS px per photo pixel
+    const cs = canvas.style
+    cs.position = 'absolute'
+    cs.left = `${fx * k}px`
+    cs.top = `${fy * k}px`
+    cs.width = `${fw * k}px`
+    cs.height = `${fh * k}px`
+    this.region = true
+    e.renderRegion(r, fx, fy, { view: v.holding ? 'before' : v.mode, showClipping: v.clipping })
+    return true
+  }
+
+  /** Back to drawing the whole photo (the histogram keeps showing it meanwhile). */
+  private leaveRegion() {
+    this.region = false
+    const cs = (this.engine.canvas as HTMLCanvasElement).style
+    cs.position = cs.left = cs.top = cs.width = cs.height = ''
+  }
+
+  private requestFull() {
+    if (this.full !== 'idle' || !this.loadFull) return
+    this.full = 'loading'
+    this.loadFull(this.abort.signal).then(
+      (img) => {
+        if (this.abort.signal.aborted) return
+        this.engine.setFullSource?.(img)
+        this.full = 'ready'
+        this.request()
+      },
+      () => {
+        this.full = 'failed'
+      },
+    )
+  }
+
   private scheduleHistogram() {
     if (this.histTimer) return
     this.histTimer = setTimeout(() => {
@@ -190,6 +260,10 @@ export class StageView {
   }
 
   dispose() {
+    this.abort.abort()
+    if (this.region) this.leaveRegion()
+    // The engine outlives the stage (layout switches); don't keep hundreds of MB around for it.
+    if (this.full === 'ready') this.engine.setFullSource?.(null)
     cancelAnimationFrame(this.raf)
     clearTimeout(this.histTimer)
     clearTimeout(this.settleTimer)

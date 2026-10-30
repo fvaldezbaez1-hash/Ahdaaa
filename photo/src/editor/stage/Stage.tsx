@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { loadFullResolution } from '../../io/api'
 import { Icon } from '../../ui/Icon'
 import { CropOverlay } from '../crop/CropOverlay'
 import { pickWhiteBalance } from '../panels/actions'
@@ -42,7 +43,7 @@ export function Stage({ pad }: { pad: number }) {
     const canvas = session.engine.canvas as HTMLCanvasElement
     photo.prepend(canvas)
     const fullScale = session.photo.fullWidth / session.photo.image.width
-    const s = new StageView(session.engine, photo, fullScale)
+    const s = new StageView(session.engine, photo, fullScale, async (signal) => (await loadFullResolution(session.id, signal)).image)
     sv.current = s
     stageControl.attach(s)
     const ro = new ResizeObserver(([e]) => s.setStage(e.contentRect.width, e.contentRect.height, pad))

@@ -1,5 +1,6 @@
 // Working-resolution images for the editor, decoded from the stored original
 // and kept in a small LRU so reopening a recent photo is instant.
+import type { SourceImage } from '../engine/types'
 import { db } from './db'
 import { workingLongEdge } from './platform'
 import { seams } from './seams'
@@ -50,7 +51,8 @@ export async function loadWorking(id: string, requested = workingLongEdge()): Pr
       cache.delete(id)
       cache.set(id, hit)
       if (edge <= maxLongEdge) return hit
-      return { ...hit, image: await work('resample', { image: hit.image, maxLongEdge }) }
+      const image: SourceImage = await work('resample', { image: hit.image, maxLongEdge })
+      return { ...hit, image: { ...image, fullWidth: hit.fullWidth } }
     }
   }
   const key = `${id}@${maxLongEdge}`
@@ -67,4 +69,13 @@ export async function loadWorking(id: string, requested = workingLongEdge()): Pr
     inflight.set(key, p)
   }
   return p
+}
+
+/** Full-resolution decode for the editor's 100 % view. Not cached: it can take hundreds of MB. */
+export async function loadFullResolution(id: string, signal?: AbortSignal): Promise<DecodedPhoto> {
+  const hit = cache.get(id)
+  if (hit && hit.image.width >= hit.fullWidth) return hit
+  const rec = await db.photos.get(id)
+  if (!rec) throw new Error('This photo is no longer in the library.')
+  return decodeStored(rec, 'full', undefined, signal)
 }
