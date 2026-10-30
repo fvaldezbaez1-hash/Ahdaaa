@@ -3,9 +3,13 @@
 Blocks ads, trackers, and malware sites in **every app and browser** on your
 phone. No root, no account, no subscription, nothing leaves your phone.
 
-> **Also in this repo:** [Forge](fitness/README.md), a private fitness app
-> (workout logger + food diary + smart calorie targets) that installs to your
-> home screen on iPhone and Android.
+> **Also in this repo:**
+> - [Forge](fitness/README.md), a private fitness app (workout logger + food
+>   diary + smart calorie targets) that installs to your home screen on iPhone
+>   and Android.
+> - [Lumen](photo/README.md), a pro photo editor (RAW from 1,000+ cameras,
+>   100 presets, full-resolution export) for iPhone, iPad, Android, Mac and
+>   Windows.
 
 ---
 

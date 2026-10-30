@@ -91,13 +91,14 @@ Code map:
 ## Publishing (one-time setup)
 
 The `Forge fitness app` GitHub Actions workflow tests and builds the app on
-every push. On the `main` branch it also publishes to GitHub Pages. GitHub
-needs Pages switched on once:
+every push. On the `main` branch, the `Publish apps to GitHub Pages` workflow
+publishes it (together with [Lumen](../photo/README.md) under `/photo/`).
+GitHub needs Pages switched on once:
 
 1. In the repository on GitHub, go to **Settings → Pages**.
 2. Under **Build and deployment → Source**, pick **GitHub Actions**.
-3. Re-run the latest **Forge fitness app** workflow on `main` (Actions tab →
-   the run → **Re-run all jobs**), or push any change to `fitness/`.
+3. Run the **Publish apps to GitHub Pages** workflow (Actions tab → the
+   workflow → **Run workflow** on `main`), or push any change to `fitness/`.
 
 The app is then live at `https://fvaldezbaez1-hash.github.io/Ahdaaa/`. Updates
 download in the background and apply the next time the app is opened fresh.
