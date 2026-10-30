@@ -3,6 +3,7 @@ import LibRaw from 'libraw-wasm'
 import { createEngine } from '/src/engine/index.ts'
 import { renderTiled } from '/src/engine/export.ts'
 import { detectCaps, Gpu } from '/src/engine/gl.ts'
+import { boxReduce } from '/src/engine/image.ts'
 import { defaultRecipe, normalizeRecipe } from '/src/edit/defaults.ts'
 import { mat3 } from '/src/color/matrices.ts'
 import { rawWbForNeutral, relativeWbForNeutral, tempTintFromMultipliers } from '/src/color/wb.ts'
@@ -265,5 +266,37 @@ async function fullExport(url) {
   return { width: r.width, height: r.height, ms: Math.round(performance.now() - t0), tiles: ticks, type: r.data.constructor.name }
 }
 
-window.lab = { contextLoss, fullExport, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
+/** 100 % view (renderRegion on the full source, working copy at half size) must match the export pixel for pixel. */
+async function regionCheck(name, patch, x, y) {
+  const p = photos[name]
+  const full = p.image
+  const working = { ...boxReduce(full, 2), fullWidth: full.fullWidth }
+  const recipe = recipeFor(name, patch)
+  engine.setSource(working, p.color)
+  engine.setFullSource(full)
+  engine.resize(640, 480)
+  const t0 = performance.now()
+  engine.renderRegion(recipe, x, y)
+  const gl = canvas.getContext('webgl2')
+  const px = new Uint8Array(640 * 480 * 4)
+  gl.readPixels(0, 0, 640, 480, gl.RGBA, gl.UNSIGNED_BYTE, px)
+  const ms = Math.round(performance.now() - t0)
+  const ex = await engine.renderImage(recipe, full, p.color, { bitDepth: 8, colorSpace: 'srgb' })
+  let max = 0, sum = 0
+  for (let j = 0; j < 480; j++)
+    for (let i = 0; i < 640; i++) {
+      const a = ((479 - j) * 640 + i) * 4, b = ((y + j) * ex.width + x + i) * 4
+      for (let k = 0; k < 3; k++) {
+        const d = Math.abs(px[a + k] - ex.data[b + k])
+        max = Math.max(max, d)
+        sum += d
+      }
+    }
+  const size = engine.regionOutputSize(recipe)
+  const sample = engine.samplePixel(0.5, 0.5, 2)
+  engine.setFullSource(null)
+  return { size: [size.width, size.height], export: [ex.width, ex.height], maxDiff: max, meanDiff: sum / (640 * 480 * 3), ms, sample }
+}
+
+window.lab = { contextLoss, fullExport, regionCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
 window.ready = true

@@ -7,12 +7,12 @@ import { defaultRecipe } from '../edit/defaults'
 import type { EditRecipe } from '../edit/types'
 import { autoSettings } from './auto'
 import { renderTiled } from './export'
-import { frameSize, normalizedToSource, outputSize, outputToSource, type Size } from './geometry'
+import { applyAffine, frameSize, mapBounds, normalizedToSource, outputSize, outputToSource, type Size } from './geometry'
 import { detectCaps, Gpu, type Target, type Texture } from './gl'
 import { binHistogram } from './histogram'
 import { areaDownscale, atmosphericLight, averagePixel, boxReduce, lowResSize, type FloatImage } from './image'
 import { frameParams, toWorkingSpace, type FrameParams } from './params'
-import { computeGuide, Luts, marginFor, renderFrame, scaleSource, StageCache, type Guide, type ScaledSource } from './pipeline'
+import { computeGuide, Luts, marginFor, renderFrame, scaleSource, StageCache, type Frame, type Guide, type ScaledSource } from './pipeline'
 import { DOWNSAMPLE, PRESENT } from './shaders'
 import type { Engine, ExportRenderOptions, Histogram, RenderedImage, RenderOptions, SourceColor, SourceImage } from './types'
 
@@ -36,11 +36,15 @@ interface Source {
 }
 
 interface LastRender {
-  recipe: EditRecipe
-  uncropped: boolean
   shown: 'after' | 'before'
   version: number
+  /** Normalized position in the drawn frame → source image and pixel, for the eyedropper. */
+  pick: (nx: number, ny: number) => { img: SourceImage; x: number; y: number }
 }
+
+type Views = { after: StageCache; before: StageCache }
+/** A frame minus what depends on the recipe (guide, airlight) and the canvas (output space). */
+type FrameBase = Omit<Frame, 'output' | 'guide' | 'air'>
 
 class WebGLEngine implements Engine {
   readonly canvas: HTMLCanvasElement | OffscreenCanvas
@@ -48,11 +52,17 @@ class WebGLEngine implements Engine {
   private gl: WebGL2RenderingContext | null = null
   private gpu: Gpu | null = null
   private luts: Luts | null = null
-  private views: { after: StageCache; before: StageCache } | null = null
+  private views: Views | null = null
+  /** Separate caches for the 100 % view, so switching zoom doesn't thrash the fit view's stages. */
+  private regionViews: Views | null = null
   private display: { after: Target | null; before: Target | null } = { after: null, before: null }
   private src: Source | null = null
   private pending: { img: SourceImage; color: SourceColor } | null = null
   private scaled: { ratio: number; s: ScaledSource } | null = null
+  private full: SourceImage | null = null
+  /** The uploaded window of the full source for renderRegion. */
+  private window: { key: string; s: ScaledSource } | null = null
+  private sourceVersion = 0
   private guides = new Map<string, Guide>()
   private output: 'srgb' | 'display-p3' = 'srgb'
   private last: LastRender | null = null
@@ -73,7 +83,9 @@ class WebGLEngine implements Engine {
     })
     target.addEventListener('webglcontextrestored', () => {
       this.init()
+      const full = this.full
       if (this.pending) this.setSource(this.pending.img, this.pending.color)
+      this.full = full
       this.restoreCbs.forEach((cb) => cb())
     })
   }
@@ -86,6 +98,7 @@ class WebGLEngine implements Engine {
     this.gpu = new Gpu(gl, caps)
     this.luts = new Luts(this.gpu)
     this.views = { after: new StageCache(this.gpu), before: new StageCache(this.gpu) }
+    this.regionViews = { after: new StageCache(this.gpu), before: new StageCache(this.gpu) }
     // Wide-gamut canvas where the display can show it.
     const wide = typeof matchMedia === 'function' && matchMedia('(color-gamut: p3)').matches
     if (wide && typeof HTMLCanvasElement !== 'undefined' && this.canvas instanceof HTMLCanvasElement && 'drawingBufferColorSpace' in gl) {
@@ -99,6 +112,8 @@ class WebGLEngine implements Engine {
     this.gpu = null
     this.luts = null
     this.views = null
+    this.regionViews = null
+    this.window = null
     this.display = { after: null, before: null }
     this.src = null
     this.scaled = null
@@ -114,6 +129,7 @@ class WebGLEngine implements Engine {
       gpu.destroy(this.src.lowTex)
     }
     if (this.scaled) gpu.free(this.scaled.s.tex)
+    if (this.window) gpu.free(this.window.s.tex)
     this.guides.forEach((g) => {
       gpu.free(g.coef)
       gpu.free(g.haze)
@@ -121,12 +137,17 @@ class WebGLEngine implements Engine {
     this.guides.clear()
     this.views?.after.dispose()
     this.views?.before.dispose()
+    this.regionViews?.after.dispose()
+    this.regionViews?.before.dispose()
     this.src = null
     this.scaled = null
+    this.window = null
   }
 
   setSource(img: SourceImage, color: SourceColor): void {
     this.pending = { img, color }
+    this.full = null
+    this.sourceVersion++
     const gpu = this.gpu
     if (!gpu) return
     this.freeSourceState()
@@ -185,9 +206,8 @@ class WebGLEngine implements Engine {
   }
 
   render(recipe: EditRecipe, opts: RenderOptions = {}): void {
-    const gpu = this.gpu, src = this.src
-    if (!gpu || !src || !this.views || !this.luts || gpu.gl.isContextLost()) return
-    const view = opts.view ?? 'after'
+    const src = this.src
+    if (!this.ready() || !src) return
     const uncropped = !!opts.uncropped
     const size: Size = { width: src.img.width, height: src.img.height }
     const out = outputSize(size, recipe.geometry, uncropped)
@@ -196,40 +216,96 @@ class WebGLEngine implements Engine {
     // Process at the size the image is shown (never above the working size): fast when zoomed out.
     const scale = Math.min(1, fit)
     const proc = { width: Math.max(1, Math.min(cw, Math.round(out.width * scale))), height: Math.max(1, Math.min(ch, Math.round(out.height * scale))) }
-    const scaled = this.scaledSource(scale)
     const fs = frameSize(size, recipe.geometry)
     const pixelScale = scale * (src.img.width / (src.img.fullWidth ?? src.img.width))
     const frameLong = Math.max(fs.width, fs.height) * scale
     const M = marginFor(pixelScale, frameLong)
-    const toSource = outputToSource(size, recipe.geometry, uncropped, proc)
-
-    const draw = (which: 'after' | 'before', r: EditRecipe) => {
-      const params = frameParams(r, src.color)
-      const guide = this.guideFor(params)
-      let t = this.display[which]
-      if (!t || t.width !== proc.width || t.height !== proc.height) {
-        gpu.free(t)
-        t = gpu.target(proc.width, proc.height, 'rgba16f', true)
-        this.display[which] = t
-      }
-      renderFrame(gpu, this.views![which], this.luts!, {
-        outSize: proc, toSource, fullSize: size, src: scaled, pixelScale, frameLong, output: this.output, guide,
-        region: { x: -M, y: -M, w: proc.width + 2 * M, h: proc.height + 2 * M }, inner: { x: 0, y: 0, w: proc.width, h: proc.height },
-        air: toWorkingSpace(params.input, src.air),
-      }, params, t, { dither: false, clipping: !!opts.showClipping })
-      return t
+    const base: FrameBase = {
+      outSize: proc, toSource: outputToSource(size, recipe.geometry, uncropped, proc), fullSize: size, src: this.scaledSource(scale), pixelScale, frameLong,
+      region: { x: -M, y: -M, w: proc.width + 2 * M, h: proc.height + 2 * M }, inner: { x: 0, y: 0, w: proc.width, h: proc.height },
     }
-    const after = view !== 'before' ? draw('after', recipe) : null
-    const before = view !== 'after' ? draw('before', { ...src.before, geometry: recipe.geometry }) : null
-
     const rect = fit <= 1
       ? [Math.floor((cw - proc.width) / 2), Math.floor((ch - proc.height) / 2), proc.width, proc.height]
       : [(cw - out.width * fit) / 2, (ch - out.height * fit) / 2, out.width * fit, out.height * fit]
+    this.draw(recipe, opts, base, this.views!, rect, (nx, ny) => {
+      const [x, y] = normalizedToSource(size, recipe.geometry, uncropped, nx, ny)
+      return { img: src.img, x, y }
+    })
+  }
+
+  setFullSource(img: SourceImage | null): void {
+    this.full = img
+    this.sourceVersion++
+  }
+
+  regionOutputSize(recipe: EditRecipe, opts?: { uncropped?: boolean }): { width: number; height: number } {
+    const img = this.full ?? this.src?.img ?? this.pending?.img
+    return img ? outputSize(img, recipe.geometry, !!opts?.uncropped) : { width: 0, height: 0 }
+  }
+
+  renderRegion(recipe: EditRecipe, x: number, y: number, opts: RenderOptions = {}): void {
+    const src = this.src, gpu = this.gpu
+    if (!this.ready() || !src || !gpu) return
+    // Exactly one export tile, drawn to the canvas: same margins, same filters, same look.
+    const img = this.full ?? src.img
+    const size: Size = { width: img.width, height: img.height }
+    const g = recipe.geometry, uncropped = !!opts.uncropped
+    const out = outputSize(size, g, uncropped)
+    const cw = this.canvas.width, ch = this.canvas.height
+    const w = Math.min(cw, out.width), h = Math.min(ch, out.height)
+    const x0 = Math.max(0, Math.min(out.width - w, Math.round(x))), y0 = Math.max(0, Math.min(out.height - h, Math.round(y)))
+    const toSource = outputToSource(size, g, uncropped, out)
+    const pixelScale = img.width / (img.fullWidth ?? img.width)
+    const fs = frameSize(size, g)
+    const M = marginFor(pixelScale, Math.max(fs.width, fs.height))
+    const region = { x: x0 - M, y: y0 - M, w: w + 2 * M, h: h + 2 * M }
+    const b = mapBounds(toSource, region.x, region.y, region.x + region.w, region.y + region.h)
+    const ix0 = Math.max(0, Math.min(img.width - 1, Math.floor(b.x0) - 3)), iy0 = Math.max(0, Math.min(img.height - 1, Math.floor(b.y0) - 3))
+    const ix1 = Math.max(ix0 + 1, Math.min(img.width, Math.ceil(b.x1) + 3)), iy1 = Math.max(iy0 + 1, Math.min(img.height, Math.ceil(b.y1) + 3))
+    const key = JSON.stringify([this.sourceVersion, ix0, iy0, ix1, iy1])
+    if (this.window?.key !== key) {
+      if (this.window) gpu.free(this.window.s.tex)
+      // Only the visible window is uploaded; panning re-uploads it, slider moves reuse it.
+      const int = gpu.uploadRgb16(img.data, img.width, ix0, iy0, ix1 - ix0, iy1 - iy0)
+      this.window = { key, s: scaleSource(gpu, int, ix0, iy0, 1, 1, { x: ix0, y: iy0, w: ix1 - ix0, h: iy1 - iy0 }) }
+      gpu.destroy(int)
+    }
+    const base: FrameBase = { outSize: out, toSource, fullSize: size, src: this.window.s, pixelScale, frameLong: Math.max(fs.width, fs.height), region, inner: { x: x0, y: y0, w, h } }
+    const rect = [Math.floor((cw - w) / 2), Math.floor((ch - h) / 2), w, h]
+    this.draw(recipe, opts, base, this.regionViews!, rect, (nx, ny) => {
+      const [sx, sy] = applyAffine(toSource, x0 + nx * w, y0 + ny * h)
+      return { img, x: sx, y: sy }
+    })
+  }
+
+  private ready(): boolean {
+    return !!this.gpu && !!this.views && !!this.luts && !this.gpu.gl.isContextLost()
+  }
+
+  /** Render after / before for a frame and present them (with split) inside `rect` of the canvas. */
+  private draw(recipe: EditRecipe, opts: RenderOptions, base: FrameBase, views: Views, rect: number[], pick: LastRender['pick']) {
+    const gpu = this.gpu!, src = this.src!
+    const view = opts.view ?? 'after'
+    const { w, h } = base.inner
+    const one = (which: 'after' | 'before', r: EditRecipe) => {
+      const params = frameParams(r, src.color)
+      let t = this.display[which]
+      if (!t || t.width !== w || t.height !== h) {
+        gpu.free(t)
+        t = gpu.target(w, h, 'rgba16f', true)
+        this.display[which] = t
+      }
+      const frame: Frame = { ...base, output: this.output, guide: this.guideFor(params), air: toWorkingSpace(params.input, src.air) }
+      renderFrame(gpu, views[which], this.luts!, frame, params, t, { dither: false, clipping: !!opts.showClipping })
+      return t
+    }
+    const after = view !== 'before' ? one('after', recipe) : null
+    const before = view !== 'after' ? one('before', { ...src.before, geometry: recipe.geometry }) : null
     const split = view === 'before' ? 2 : view === 'split' ? Math.min(1, Math.max(0, opts.split ?? 0.5)) : -1
     gpu.program('present', PRESENT).tex('u_after', (after ?? before)!, 0).tex('u_before', (before ?? after)!, 1)
-      .f('u_rect', rect[0], rect[1], rect[2], rect[3]).f('u_split', split).f('u_canvasH', ch)
-    gpu.draw(null, cw, ch)
-    this.last = { recipe, uncropped, shown: view === 'before' ? 'before' : 'after', version: ++this.renders }
+      .f('u_rect', rect[0], rect[1], rect[2], rect[3]).f('u_split', split).f('u_canvasH', this.canvas.height)
+    gpu.draw(null, this.canvas.width, this.canvas.height)
+    this.last = { shown: view === 'before' ? 'before' : 'after', version: ++this.renders, pick }
   }
 
   histogram(): Histogram | null {
@@ -247,12 +323,16 @@ class WebGLEngine implements Engine {
     return h
   }
 
+  /** `radius` is in pixels of the image sampled (the working source, or the full source after renderRegion). */
   samplePixel(nx: number, ny: number, radius = 3): Vec3 | null {
     const src = this.src
     if (!src) return null
-    const g = this.last?.recipe.geometry ?? src.before.geometry
-    const [x, y] = normalizedToSource(src.img, g, !!this.last?.uncropped, nx, ny)
-    return averagePixel(src.img, x, y, radius)
+    if (!this.last) {
+      const [x, y] = normalizedToSource(src.img, src.before.geometry, false, nx, ny)
+      return averagePixel(src.img, x, y, radius)
+    }
+    const p = this.last.pick(nx, ny)
+    return averagePixel(p.img, p.x, p.y, radius)
   }
 
   auto(recipe: EditRecipe): ReturnType<Engine['auto']> {
@@ -281,6 +361,7 @@ class WebGLEngine implements Engine {
     }
     this.drop()
     this.pending = null
+    this.full = null
     this.restoreCbs.clear()
     this.gl?.getExtension('WEBGL_lose_context')?.loseContext()
     this.gl = null

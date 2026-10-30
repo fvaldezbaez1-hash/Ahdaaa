@@ -1,7 +1,8 @@
 // Engine checks in headless Chromium (SwiftShader WebGL2): numeric tests plus
 // PNG renders for eyeballing. Run from photo/:
 //   node scripts/engine/check.mjs [--samples DIR] [--jpegs DIR] [--out DIR] [checks…]
-// checks: identity exposure eyedropper highlights tiling timing renders (default: all)
+// checks: identity exposure eyedropper highlights tiling timing region context renders (default: all but
+// 'full', the slow full-resolution RAW decode + export); 'look <name…>' renders only matching files
 import { createServer } from 'vite'
 import { createRequire } from 'node:module'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -34,7 +35,7 @@ const ok = (cond, label, detail) => console.log(`${cond ? 'PASS' : 'FAIL'} ${lab
 console.log('supported', await page.evaluate(() => window.lab.supported))
 const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-05.jpg', 'photo-21.jpg']
 for (const j of jpegList) await lab('loadJpeg', j, '/jpeg/' + j)
-const needRaw = want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
+const needRaw = want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
 if (needRaw) {
   console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW')))
   console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF')))
@@ -79,14 +80,22 @@ if (want('timing')) {
   console.log('timing (SwiftShader, ARW half-size 6.4 MP into 1600×1000)', JSON.stringify(r))
 }
 
+if (want('region')) {
+  const edit = { basic: { clarity: 40, shadows: 30, texture: 30 }, geometry: { crop: { x: 0.05, y: 0.05, w: 0.9, h: 0.9 }, angle: 3, rotate: 0, flipH: false, flipV: false, aspect: 'free' } }
+  const r = await lab('regionCheck', 'arw', edit, 900, 700)
+  ok(r.maxDiff <= 2 && r.meanDiff < 0.6 && r.size[0] === r.export[0], '100 % view (renderRegion) == export pixels', r)
+}
+
 if (want('context')) {
   const r = await lab('contextLoss', 'photo-21.jpg')
   ok(r.hasSource && r.center[3] === 255 && r.center[0] > 0, 'context lost → restored → renders again', r)
 }
 
 if (args.includes('full')) {
-  const r = await lab('fullExport', '/sample/example-sony.ARW')
-  ok(r.width === 6240 || r.width > 6000, 'full-resolution 16-bit export of the 26 MP ARW', r)
+  const arw = await lab('fullExport', '/sample/example-sony.ARW')
+  ok(arw.width === 6240 && arw.height === 4168, 'full-resolution 16-bit export of the 26 MP ARW', arw)
+  const nef = await lab('fullExport', '/sample/iss030e122639.NEF')
+  ok(nef.width >= 4200, 'full-resolution 16-bit export of the 12 MP NEF', nef)
 }
 
 if (want('renders') || want('look')) {
@@ -95,7 +104,7 @@ if (want('renders') || want('look')) {
     save(file, r.png)
     console.log('render', file, JSON.stringify({ ...r, png: undefined }))
   }
-  const only = args.filter((a) => a !== 'renders' && a !== 'look' && !['identity','exposure','eyedropper','highlights','tiling','timing'].includes(a))
+  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full'].includes(a))
   const R0 = R
   R = async (file, ...rest) => (only.length === 0 || only.some((o) => file.includes(o))) && R0(file, ...rest)
   await R('arw-default', 'arw', {})

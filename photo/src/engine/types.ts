@@ -103,6 +103,20 @@ export interface Engine {
    * in tiles, and read back the pixels. Does not disturb the interactive view.
    */
   renderImage(recipe: EditRecipe, source: SourceImage, color: SourceColor, opts: ExportRenderOptions): Promise<RenderedImage>
+  /**
+   * Full-resolution pixels of the photo given to setSource (same orientation), for
+   * true 100 % viewing with renderRegion. null releases them. Kept on the CPU;
+   * only the visible window is uploaded.
+   */
+  setFullSource?(img: SourceImage | null): void
+  /** Size of the result at the resolution renderRegion draws (full source if set, else working). */
+  regionOutputSize?(recipe: EditRecipe, opts?: { uncropped?: boolean }): { width: number; height: number }
+  /**
+   * 100 % view: draw result pixels [x, x + canvas.width) × [y, y + canvas.height)
+   * (coordinates in regionOutputSize, clamped to it) 1:1 into the canvas, centered when
+   * smaller. Same look as render() and the export; samplePixel/histogram then refer to this window.
+   */
+  renderRegion?(recipe: EditRecipe, x: number, y: number, opts?: RenderOptions): void
   /** WebGL context loss: re-upload the source and render again. */
   onContextRestored(cb: () => void): () => void
   dispose(): void
