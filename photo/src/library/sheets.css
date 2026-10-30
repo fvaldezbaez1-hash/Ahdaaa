@@ -45,18 +45,48 @@
   font-size: 13.5px;
   line-height: 1.5;
 }
+@media (pointer: coarse) {
+  /* The switch is 24 px tall; let the space around it count as a tap too. */
+  .setting-row .toggle::before {
+    content: '';
+    position: absolute;
+    inset: -10px -8px;
+  }
+}
 @media (max-width: 899px) {
+  .lib-foot {
+    flex-wrap: wrap;
+  }
   .lib-foot .btn {
     height: 44px;
     font-size: 15px;
     flex: 1;
   }
   .lib-foot .grow {
+    flex-basis: 100%;
+    text-align: center;
+  }
+  .lib-foot .grow:empty {
     display: none;
   }
 }
 
 /* ---------- Import sheet ---------- */
+.note {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.note .icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent-text);
+}
 .drop-zone {
   display: flex;
   flex-direction: column;
@@ -146,3 +176,91 @@
   background: var(--panel-3);
 }
 
+/* ---------- Export ---------- */
+.exp-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.exp-thumb {
+  width: 84px;
+  height: 56px;
+  flex: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel-3);
+}
+.exp-stack {
+  position: relative;
+  width: 100px;
+  height: 64px;
+  flex: none;
+}
+.exp-stack .exp-thumb {
+  position: absolute;
+  width: 72px;
+  height: 48px;
+  box-shadow:
+    0 0 0 2px var(--panel),
+    0 4px 10px rgba(0, 0, 0, 0.3);
+}
+.exp-stack .exp-thumb:nth-child(1) {
+  left: 0;
+  top: 16px;
+  z-index: 3;
+}
+.exp-stack .exp-thumb:nth-child(2) {
+  left: 14px;
+  top: 8px;
+  z-index: 2;
+}
+.exp-stack .exp-thumb:nth-child(3) {
+  left: 28px;
+  top: 0;
+  z-index: 1;
+}
+.exp-ready {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  text-align: center;
+}
+.exp-ready b {
+  font-size: 15px;
+}
+.exp-ready-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.exp-ready-icon.warn {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.preset-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.preset-controls .segmented {
+  flex: none;
+}
+@media (max-width: 899px) {
+  .preset-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .preset-controls .segmented button {
+    padding: 0 4px;
+    height: 32px;
+  }
+}

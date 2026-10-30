@@ -60,7 +60,7 @@ const PATHS = {
 const FILLED = {
   sparkle: 'M12 2.5l1.9 5.6 5.6 1.9-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
   starFill: 'm12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3l-5.5 2.9 1-6.2L3 9.6l6.2-.9z',
-  flagFill: 'M5 21V4h11l-1.5 4L16 12H5z',
+  flagFill: 'M4 3h2v18H4zM6 4h10l-1.5 4L16 12H6z',
   dot: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z',
 } as const
 

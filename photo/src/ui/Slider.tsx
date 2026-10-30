@@ -30,7 +30,7 @@ export interface SliderProps {
 export function formatValue(v: number, dp = 0, signed = false, unit = ''): string {
   const r = dp ? Number(v).toFixed(dp) : String(Math.round(v))
   const n = Number(r)
-  const s = n > 0 && signed ? `+${r}` : n < 0 ? `−${r.replace('-', '')}` : dp ? Number(0).toFixed(dp) : '0'
+  const s = n > 0 ? (signed ? `+${r}` : r) : n < 0 ? `−${r.replace('-', '')}` : dp ? Number(0).toFixed(dp) : '0'
   return unit ? `${s}${unit === '%' || unit === '°' ? '' : ' '}${unit}` : s
 }
 

@@ -159,7 +159,13 @@
   padding: 0 26px 0 9px;
   border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--panel-2) linear-gradient(45deg, transparent 50%, var(--text-3) 50%) no-repeat calc(100% - 14px) 50% / 5px 5px;
+  background-color: var(--panel-2);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-3) 50%), linear-gradient(135deg, var(--text-3) 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 10px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
   font-size: 12.5px;
   color: var(--text);
   outline: none;
@@ -223,6 +229,7 @@
   left: 0;
 }
 .tile {
+  -webkit-touch-callout: none;
   display: flex;
   flex-direction: column;
   border-radius: 10px;
@@ -234,7 +241,9 @@
   box-shadow: 0 0 0 2px var(--accent);
 }
 .tile.sel.focus {
-  box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px var(--accent-soft);
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 0 6px var(--accent-soft);
 }
 .tile-media {
   display: block;
@@ -296,6 +305,12 @@
 }
 .tile-flag {
   width: 24px;
+}
+/* A picked flag is the outline icon filled in (keeps its pole). */
+.tile-flag.on .icon,
+.lib-pick[aria-pressed='true']:not(.reject) .icon,
+.ptile .ov.flag .icon {
+  fill: currentColor;
 }
 .tile-flag.reject {
   color: var(--danger);
@@ -376,7 +391,10 @@
   overflow-y: auto;
 }
 .lib-info-thumb {
+  flex: none;
   aspect-ratio: 3 / 2;
+  min-height: 0;
+  overflow: hidden;
   border-radius: 10px;
   background: var(--tile);
   padding: 8px;
@@ -520,21 +538,6 @@
   align-items: center;
   gap: 10px;
 }
-.note {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  padding: 12px;
-  border-radius: 10px;
-  background: var(--panel-2);
-  color: var(--text-2);
-  font-size: 12.5px;
-}
-.note .icon {
-  flex: none;
-  margin-top: 1px;
-  color: var(--accent-text);
-}
 
 /* ---------- Phone ---------- */
 .plib {
@@ -584,9 +587,26 @@
   border-radius: 8px;
   font-size: 13px;
 }
+.plib-head .chips {
+  padding: 3px 0;
+}
 .plib-head .chips .chip {
-  height: 32px;
+  height: 38px;
   font-size: 13px;
+}
+/* 44 px touch targets without making the controls look bigger. */
+.plib-seg button,
+.plib-head .chips .chip {
+  position: relative;
+}
+.plib-seg button::after,
+.plib-head .chips .chip::after {
+  content: '';
+  position: absolute;
+  inset: -5px 0;
+}
+.plib-head .chips .chip::after {
+  inset: -3px 0;
 }
 .plib-head .lib-progress-chip {
   align-self: flex-start;

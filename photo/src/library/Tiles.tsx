@@ -37,8 +37,15 @@ function sameTile<P extends TileProps>(a: Readonly<P>, b: Readonly<P>): boolean 
   const p = a.photo
   const q = b.photo
   return (
-    p.id === q.id && p.rating === q.rating && p.flag === q.flag && p.edited === q.edited && p.fileName === q.fileName &&
-    a.box.x === b.box.x && a.box.y === b.box.y && a.box.w === b.box.w && a.box.h === b.box.h
+    p.id === q.id &&
+    p.rating === q.rating &&
+    p.flag === q.flag &&
+    p.edited === q.edited &&
+    p.fileName === q.fileName &&
+    a.box.x === b.box.x &&
+    a.box.y === b.box.y &&
+    a.box.w === b.box.w &&
+    a.box.h === b.box.h
   )
 }
 
@@ -55,13 +62,29 @@ export const DesktopTile = memo(function DesktopTile({ photo: p, box, selected, 
       <div className="tile-meta">
         <div className="tile-stars" role="group" aria-label={`Rating for ${p.fileName}`}>
           {[1, 2, 3, 4, 5].map((n) => (
-            <button key={n} type="button" tabIndex={-1} data-act="star" data-n={n} className={n <= p.rating ? 'on' : undefined} aria-label={`Rate ${n} star${n === 1 ? '' : 's'}`} aria-pressed={n <= p.rating}>
+            <button
+              key={n}
+              type="button"
+              tabIndex={-1}
+              data-act="star"
+              data-n={n}
+              className={n <= p.rating ? 'on' : undefined}
+              aria-label={`Rate ${n} star${n === 1 ? '' : 's'}`}
+              aria-pressed={n <= p.rating}
+            >
               <Icon name={n <= p.rating ? 'starFill' : 'star'} size={13} />
             </button>
           ))}
         </div>
-        <button type="button" tabIndex={-1} data-act="flag" className={`tile-flag${p.flag === 1 ? ' on' : p.flag === -1 ? ' reject' : ''}`} aria-label={flagLabel} aria-pressed={p.flag !== 0}>
-          <Icon name={p.flag === 1 ? 'flagFill' : p.flag === -1 ? 'reject' : 'flag'} size={14} />
+        <button
+          type="button"
+          tabIndex={-1}
+          data-act="flag"
+          className={`tile-flag${p.flag === 1 ? ' on' : p.flag === -1 ? ' reject' : ''}`}
+          aria-label={flagLabel}
+          aria-pressed={p.flag !== 0}
+        >
+          <Icon name={p.flag === -1 ? 'reject' : 'flag'} size={14} />
         </button>
         <span className="grow" />
         {p.edited && <span className="edited-dot" title="Edited" />}
@@ -86,7 +109,7 @@ export const PhoneTile = memo(function PhoneTile({ photo: p, box, selected, sele
         </div>
         {p.flag === 1 && (
           <span className="ov flag">
-            <Icon name="flagFill" size={11} />
+            <Icon name="flag" size={12} />
           </span>
         )}
         {p.flag === -1 && (

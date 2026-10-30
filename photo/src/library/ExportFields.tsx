@@ -44,7 +44,7 @@ export function ExportFields({
           min={10}
           max={100}
           defaultValue={92}
-          signed={false}
+          format={(v) => String(Math.round(v))}
           onChange={(quality) => onChange({ ...value, quality })}
           onCommit={(quality) => onCommit({ ...value, quality })}
         />
@@ -86,7 +86,9 @@ export function ExportFields({
       <div className="field">
         <span>Color space</span>
         <Segmented label="Color space" value={value.colorSpace} options={COLOR_SPACES} onChange={(colorSpace) => set({ colorSpace })} />
-        <small className="muted small">{value.colorSpace === 'srgb' ? 'Looks right on every screen and website.' : 'Richer reds and greens on modern phones and Macs; may look duller in older apps.'}</small>
+        <small className="muted small">
+          {value.colorSpace === 'srgb' ? 'Looks right on every screen and website.' : 'Richer reds and greens on modern phones and Macs; may look duller in older apps.'}
+        </small>
       </div>
       <div className="setting-row">
         <span className="lbl">

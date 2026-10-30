@@ -321,14 +321,14 @@ export function formatShutter(s: number): string {
 
 const trim = (n: number, dp = 1) => String(Number(n.toFixed(dp)))
 
-/** "ISO 100 · 1/320 s · ƒ/8 · 35 mm" (missing parts left out). */
+/** "ISO 100 · 1/320 s · ƒ/8 · 35 mm" (missing parts left out; each part stays on one line). */
 export function formatExposure(m: PhotoRecord['meta']): string {
   const parts: string[] = []
   if (m.iso) parts.push(`ISO ${m.iso}`)
   if (m.shutter) parts.push(formatShutter(m.shutter))
   if (m.aperture) parts.push(`ƒ/${trim(m.aperture)}`)
   if (m.focalLength) parts.push(`${trim(m.focalLength, 0)} mm`)
-  return parts.join(' · ')
+  return parts.map((p) => p.replace(/ /g, '\u00a0')).join(' · ')
 }
 
 /** Camera name without the maker repeated ("Canon" + "Canon EOS R5" → "Canon EOS R5"). */
@@ -360,9 +360,9 @@ export function formatTaken(ms: number, locale?: string): string {
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`
 
-/** "Imported 22 photos · 2 skipped (already in your library) · 3 other files ignored". */
-export function importSummary(added: number, skipped: readonly { reason: string }[], ignored: number, cancelled: boolean): string {
-  const parts = [cancelled ? `Import cancelled after ${plural(added, 'photo')}` : added ? `Imported ${plural(added, 'photo')}` : 'No photos imported']
+/** "Imported 22 photos · 2 skipped (already in your library) · 1 note · 3 other files ignored". */
+export function importSummary(added: number, skipped: readonly { reason: string }[], notices: readonly unknown[], ignored: number, cancelled: boolean): string {
+  const parts = [cancelled ? `Import stopped after ${plural(added, 'photo')}` : added ? `Imported ${plural(added, 'photo')}` : 'No photos imported']
   if (skipped.length) {
     const reasons = new Map<string, number>()
     for (const s of skipped) {
@@ -373,6 +373,7 @@ export function importSummary(added: number, skipped: readonly { reason: string 
     const why = top.map(([r, n]) => (reasons.size > 1 ? `${n} ${r}` : r)).join(', ') + (reasons.size > 2 ? ', …' : '')
     parts.push(`${skipped.length.toLocaleString('en-US')} skipped (${why})`)
   }
+  if (notices.length) parts.push(plural(notices.length, 'note'))
   if (ignored) parts.push(`${plural(ignored, 'other file')} ignored`)
   return parts.join(' · ')
 }

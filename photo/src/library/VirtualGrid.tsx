@@ -21,6 +21,7 @@ export function VirtualGrid({
   count,
   render,
   overscan = 3,
+  style,
   ...rest
 }: {
   grid: HTMLDivElement | null
@@ -59,7 +60,7 @@ export function VirtualGrid({
     }
   }
   return (
-    <div ref={gridRef} className="vgrid" style={{ height: Math.max(0, rows * layout.rowH - layout.gap) }} {...rest}>
+    <div ref={gridRef} className="vgrid" style={{ ...style, height: Math.max(0, rows * layout.rowH - layout.gap) }} {...rest}>
       {items}
     </div>
   )

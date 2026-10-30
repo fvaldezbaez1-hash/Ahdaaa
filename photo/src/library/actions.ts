@@ -46,11 +46,9 @@ export function queueThumbnails(ids: readonly string[]) {
 
 // ---------- Ratings, flags ----------
 
-export const setRating = (ids: readonly string[], rating: number) =>
-  attempt("Couldn't rate", () => db.photos.where(':id').anyOf(ids).modify({ rating }))
+export const setRating = (ids: readonly string[], rating: number) => attempt("Couldn't rate", () => db.photos.where(':id').anyOf(ids).modify({ rating }))
 
-export const setFlag = (ids: readonly string[], flag: -1 | 0 | 1) =>
-  attempt("Couldn't flag", () => db.photos.where(':id').anyOf(ids).modify({ flag }))
+export const setFlag = (ids: readonly string[], flag: -1 | 0 | 1) => attempt("Couldn't flag", () => db.photos.where(':id').anyOf(ids).modify({ flag }))
 
 // ---------- Recipes ----------
 
@@ -108,16 +106,22 @@ export async function createAlbum(name: string, photoIds: readonly string[] = []
 
 export const addToAlbum = (ids: readonly string[], albumId: string) =>
   attempt("Couldn't add to the album", () =>
-    db.photos.where(':id').anyOf(ids).modify((p) => {
-      if (!p.albumIds.includes(albumId)) p.albumIds = [...p.albumIds, albumId]
-    }),
+    db.photos
+      .where(':id')
+      .anyOf(ids)
+      .modify((p) => {
+        if (!p.albumIds.includes(albumId)) p.albumIds = [...p.albumIds, albumId]
+      }),
   )
 
 export const removeFromAlbum = (ids: readonly string[], albumId: string) =>
   attempt("Couldn't remove from the album", () =>
-    db.photos.where(':id').anyOf(ids).modify((p) => {
-      p.albumIds = p.albumIds.filter((a) => a !== albumId)
-    }),
+    db.photos
+      .where(':id')
+      .anyOf(ids)
+      .modify((p) => {
+        p.albumIds = p.albumIds.filter((a) => a !== albumId)
+      }),
   )
 
 export const renameAlbum = (id: string, name: string) => attempt("Couldn't rename the album", () => db.albums.update(id, { name: name.trim() || 'Untitled album' }))
@@ -127,9 +131,12 @@ export const deleteAlbum = (id: string) =>
   attempt("Couldn't delete the album", () =>
     db.transaction('rw', db.albums, db.photos, async () => {
       await db.albums.delete(id)
-      await db.photos.where('albumIds').equals(id).modify((p) => {
-        p.albumIds = p.albumIds.filter((a) => a !== id)
-      })
+      await db.photos
+        .where('albumIds')
+        .equals(id)
+        .modify((p) => {
+          p.albumIds = p.albumIds.filter((a) => a !== id)
+        })
     }),
   )
 

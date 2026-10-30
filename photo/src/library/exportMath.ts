@@ -62,8 +62,8 @@ export function estimateBytes(photos: readonly Sized[], opts: Pick<ExportOptions
   return total
 }
 
-/** "IMG_0001.CR3" → "IMG_0001.jpg". */
+/** The name export gives the file: "IMG_0001.CR3" → "IMG_0001-lumen.jpg". */
 export function exportName(fileName: string, format: ExportFormat): string {
   const base = fileName.replace(/\.[^.]+$/, '')
-  return `${base}.${FORMATS.find((f) => f.value === format)?.ext ?? 'jpg'}`
+  return `${base}-lumen.${FORMATS.find((f) => f.value === format)?.ext ?? 'jpg'}`
 }

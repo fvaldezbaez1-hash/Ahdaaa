@@ -1,0 +1,238 @@
+/* Settings: section nav + one column of cards (desktop), a single column on phones. */
+.settings {
+  height: calc(100dvh - var(--topbar-h) - var(--safe-top));
+  overflow-y: auto;
+  background: var(--bg);
+}
+.settings-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 24px 64px;
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: 36px;
+}
+.settings-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+}
+.settings-nav h1 {
+  padding: 0 8px 14px;
+}
+.settings-nav button {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--text-2);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.settings-nav button:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.settings-nav button[aria-current='true'] {
+  background: var(--panel-3);
+  color: var(--text);
+  font-weight: 600;
+}
+.settings-main {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  max-width: 680px;
+  min-width: 0;
+}
+.set-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-margin-top: 20px;
+}
+.set-section > header h2 {
+  font-size: 17px;
+  font-weight: 700;
+}
+.set-section > header p {
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.set-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.set-card > hr {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.set-row .lbl {
+  min-width: 0;
+}
+.set-row .lbl b {
+  display: block;
+  font-weight: 600;
+}
+.set-row .lbl small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.set-row .btn {
+  flex: none;
+}
+.theme-seg button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 13px;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.status::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.status.good {
+  color: var(--good);
+}
+.status.good::before {
+  background: var(--good);
+}
+.status.warn {
+  color: var(--accent-text);
+}
+.status.warn::before {
+  background: var(--accent);
+}
+.set-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.set-warning .icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent-text);
+}
+.set-danger {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+.keys {
+  display: grid;
+  grid-template-columns: minmax(150px, max-content) minmax(0, 1fr);
+  gap: 10px 18px;
+  margin: 0;
+  font-size: 13px;
+}
+.keys dt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.keys dd {
+  margin: 0;
+  color: var(--text-2);
+}
+kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  background: var(--panel-2);
+  font: 600 11.5px/1 var(--font);
+  color: var(--text);
+}
+.about p {
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.about ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 899px) {
+  .settings {
+    height: calc(100dvh - var(--tabbar-h) - var(--safe-bottom));
+  }
+  .settings-inner {
+    display: block;
+    padding: calc(18px + var(--safe-top)) 16px 40px;
+  }
+  .settings-nav {
+    position: static;
+    padding: 0;
+  }
+  .settings-nav h1 {
+    padding: 0 0 18px;
+    font-size: 30px;
+    font-weight: 750;
+    letter-spacing: -0.02em;
+  }
+  .settings-nav button {
+    display: none;
+  }
+  .settings-main {
+    gap: 28px;
+  }
+  .set-row {
+    flex-wrap: wrap;
+  }
+  .set-row .btn {
+    height: 44px;
+    font-size: 15px;
+  }
+  .theme-seg button {
+    height: 38px;
+  }
+}

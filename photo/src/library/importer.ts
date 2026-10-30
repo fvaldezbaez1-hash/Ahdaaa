@@ -12,7 +12,7 @@ export const LAST_IMPORT_KEY = 'library.lastImportAt'
 export interface ImportState {
   running: boolean
   progress: ImportProgress | null
-  /** The last finished import, until dismissed (the import sheet lists skipped files). */
+  /** The last import's skipped files and notices, until dismissed (the import sheet lists them). */
   result: (ImportResult & { ignored: number; cancelled: boolean }) | null
 }
 
@@ -53,16 +53,25 @@ export const importer = {
     try {
       await kvSet(LAST_IMPORT_KEY, startedAt)
       const res = await importFiles(files, { presetId, signal, onProgress: (progress) => set({ progress }) })
-      const result = { ...res, ignored, cancelled: signal.aborted }
-      set({ result })
-      toast(importSummary(result.added.length, result.skipped, ignored, result.cancelled), 5000)
+      const cancelled = signal.aborted
+      // Kept only when there is more to say than the toast can (which files, and why).
+      if (res.skipped.length || res.notices.length) set({ result: { ...res, ignored, cancelled } })
+      toast(importSummary(res.added.length, res.skipped, res.notices, ignored, cancelled), 6000)
     } catch (e) {
       toast(signal.aborted ? 'Import cancelled' : `Import failed: ${errorMessage(e)}`, 5000)
     } finally {
       controller = null
       set({ running: false, progress: null })
       // Nothing new arrived: keep "Last import" pointing at the previous one.
-      if (previous !== undefined && (await db.photos.where('addedAt').aboveOrEqual(startedAt).count().catch(() => 1)) === 0) await kvSet(LAST_IMPORT_KEY, previous).catch(() => {})
+      if (
+        previous !== undefined &&
+        (await db.photos
+          .where('addedAt')
+          .aboveOrEqual(startedAt)
+          .count()
+          .catch(() => 1)) === 0
+      )
+        await kvSet(LAST_IMPORT_KEY, previous).catch(() => {})
     }
   },
 
