@@ -10,7 +10,7 @@ import {
   type HandleId, type SpotPart,
 } from './handles'
 import { updateMask } from './model'
-import { describeSample } from './sample'
+import { describeDeveloped, describeSample } from './sample'
 import { makeSpace, type Pt, type Space } from './space'
 
 // What a single pointer does on the photo while masking or healing. Every
@@ -63,10 +63,13 @@ export function createMaskTool(session: Session, cursor: CursorFn): StageTool {
       const v = view.get()
       if (mask.type === 'range' && v.rangePick) {
         const c = (session.engine.canvas as HTMLCanvasElement).getBoundingClientRect()
-        const sample = session.engine.samplePixel((p.clientX - c.left) / c.width, (p.clientY - c.top) / c.height, 4)
+        const nx = (p.clientX - c.left) / c.width, ny = (p.clientY - c.top) / c.height
+        // The photo as developed is what range masks measure; the source color is the fallback.
+        const developed = session.engine.samplePixel(nx, ny, 4, { developed: true })
+        const sample = developed ? null : session.engine.samplePixel(nx, ny, 4)
         view.set({ rangePick: false })
-        if (!sample) return true
-        const d = describeSample(sample, session.photo.color)
+        if (!developed && !sample) return true
+        const d = developed ? describeDeveloped(developed) : describeSample(sample!, session.photo.color)
         const next: Mask = mask.range === 'luminance' ? { ...mask, low: Math.max(0, d.lum - 20), high: Math.min(100, d.lum + 20) } : { ...mask, hue: d.hue, sat: d.sat }
         editor.apply((x) => updateMask(x, layer.id, mask.id, () => next), mask.range === 'luminance' ? 'Pick brightness range' : 'Pick color range')
         return true

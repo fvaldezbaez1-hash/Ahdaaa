@@ -267,3 +267,13 @@ describe('copy & paste of masks and healing', () => {
     expect(pasteGroups(target, clip, ['retouch']).retouch).toEqual(src.retouch)
   })
 })
+
+describe('range eyedropper on the developed photo', () => {
+  it('reads brightness and color the way range masks measure them', async () => {
+    const { describeDeveloped } = await import('./sample')
+    expect(describeDeveloped([0.5, 0.5, 0.5])).toEqual({ lum: 50, hue: 0, sat: 0 })
+    expect(describeDeveloped([1, 0, 0])).toMatchObject({ hue: 0, sat: 100 })
+    expect(describeDeveloped([0, 0, 1])).toMatchObject({ hue: 240, sat: 100 })
+    expect(describeDeveloped([1, 1, 1]).lum).toBe(100)
+  })
+})

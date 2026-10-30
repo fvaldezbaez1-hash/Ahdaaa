@@ -38,7 +38,11 @@ export function PresetsPanel({ layout }: { layout: 'sidebar' | 'strip' }) {
   const photoId = useEditor((s) => s.photoId)
   const kind = useEditor((s) => s.kind)
   const recipe = useEditor((s) => s.recipe)
-  const target = usePreviewTarget(photoId, photo, kind, recipe)
+  const version = useEditor((s) => s.version)
+  // Previews follow committed edits only: re-rendering every tile while a slider drags slows the drag itself.
+  const [committed, setCommitted] = useState({ version, recipe })
+  if (committed.version !== version) setCommitted({ version, recipe })
+  const target = usePreviewTarget(photoId, photo, kind, committed.recipe)
   const [saving, setSaving] = useState(false)
   const body = layout === 'sidebar' ? <Sidebar target={target} onSave={() => setSaving(true)} /> : <Strip target={target} />
   return (
