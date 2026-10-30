@@ -34,6 +34,7 @@ export function defaultRecipe(kind: SourceKind, asShot?: { temp: number; tint: n
     detail: kind === 'raw' ? { ...DEFAULT_DETAIL } : { ...DEFAULT_DETAIL_DISPLAY },
     effects: { ...DEFAULT_EFFECTS },
     geometry: { crop: { x: 0, y: 0, w: 1, h: 1 }, angle: 0, rotate: 0, flipH: false, flipV: false, aspect: 'original' },
+    retouch: [],
     layers: [],
   }
 }
@@ -66,6 +67,7 @@ export function normalizeRecipe(r: Partial<EditRecipe> | undefined, kind: Source
     detail: { ...d.detail, ...r.detail },
     effects: { ...d.effects, ...r.effects },
     geometry: { ...d.geometry, ...r.geometry, crop: { ...d.geometry.crop, ...r.geometry?.crop } },
+    retouch: r.retouch ?? [],
     layers: r.layers ?? [],
   }
 }
