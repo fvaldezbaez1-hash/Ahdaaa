@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
-import type { Preset, Variation } from '../edit/types'
-import { VARIATIONS } from '../presets/catalog'
-import { Empty, SearchBox, Segmented } from '../ui/controls'
+import type { Preset } from '../edit/types'
+import { Empty, SearchBox } from '../ui/controls'
 import { Sheet } from '../ui/Sheet'
 import { Slider } from '../ui/Slider'
 import { applyPresetTo } from './actions'
@@ -9,14 +8,13 @@ import { plural, searchTerms } from './library'
 import { usePresetGroups } from './presetGroups'
 import './sheets.css'
 
-/** Apply one look to every selected photo, at a chosen strength and variation. */
+/** Apply one look to every selected photo, at a chosen strength. */
 export function PresetSheet({ ids, onClose }: { ids: string[]; onClose: () => void }) {
   const groups = usePresetGroups()
   const [group, setGroup] = useState('all')
   const [q, setQ] = useState('')
   const [chosen, setChosen] = useState<Preset | null>(null)
   const [amount, setAmount] = useState(100)
-  const [variation, setVariation] = useState<Variation>('original')
   const [busy, setBusy] = useState(false)
 
   const shown = useMemo(() => {
@@ -35,7 +33,7 @@ export function PresetSheet({ ids, onClose }: { ids: string[]; onClose: () => vo
   const apply = async () => {
     if (!chosen) return
     setBusy(true)
-    await applyPresetTo(ids, chosen, amount, variation)
+    await applyPresetTo(ids, chosen, amount, 'original')
     setBusy(false)
     onClose()
   }
@@ -55,13 +53,12 @@ export function PresetSheet({ ids, onClose }: { ids: string[]; onClose: () => vo
         ) : (
           <div className="stack">
             <div className="preset-controls">
-              <Segmented label="Variation" value={variation} options={VARIATIONS.map((v) => ({ value: v.id, label: v.label }))} onChange={setVariation} />
               <div className="grow">
                 <Slider label="Amount" value={amount} min={0} max={200} defaultValue={100} format={(v) => `${Math.round(v)}%`} onChange={setAmount} />
               </div>
             </div>
             <div className="lib-foot">
-              <span className="grow ellipsis">{chosen ? `${chosen.name} · ${amount}%${variation === 'original' ? '' : ` · ${variation}`}` : 'Choose a look'}</span>
+              <span className="grow ellipsis">{chosen ? `${chosen.name} · ${amount}%` : 'Choose a look'}</span>
               <button type="button" className="btn ghost" onClick={onClose}>
                 Cancel
               </button>

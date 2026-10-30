@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { defaultRecipe, SPECS } from '../edit/defaults'
 import { BANDS, type EditRecipe, type SourceKind } from '../edit/types'
-import { applyPreset, builtinPresets, collections, findBuiltin, VARIATIONS } from './catalog'
+import { applyPreset, builtinPresets, collections, findBuiltin } from './catalog'
 
 // Names of real film stocks, film simulations and brands that looks must not use.
 const BANNED = /\b(portra|ektar|ektachrome|kodachrome|kodak|velvia|provia|astia|acros|eterna|superia|fuji\w*|tri-?x|t-?max|hp5|delta \d+|ilford|cinestill|polaroid|agfa|lomo\w*|vsco|classic chrome|gold 200|ultramax|colorplus|vision3|instax)\b/i
@@ -32,16 +32,15 @@ function inRange(r: EditRecipe, kind: SourceKind): string[] {
 describe('catalog', () => {
   const all = builtinPresets()
 
-  it('has 20 collections of 10 looks (200 looks, 1,000 presets with variations)', () => {
+  it('has 20 collections of 5 looks (100 presets)', () => {
     expect(collections()).toHaveLength(20)
-    for (const c of collections()) expect(c.presetIds, c.id).toHaveLength(10)
-    expect(all).toHaveLength(200)
-    expect(all.length * VARIATIONS.length).toBe(1000)
+    for (const c of collections()) expect(c.presetIds, c.id).toHaveLength(5)
+    expect(all).toHaveLength(100)
   })
 
   it('has unique ids and names, descriptions and tags', () => {
-    expect(new Set(all.map((p) => p.id)).size).toBe(200)
-    expect(new Set(all.map((p) => p.name.toLowerCase())).size).toBe(200)
+    expect(new Set(all.map((p) => p.id)).size).toBe(100)
+    expect(new Set(all.map((p) => p.name.toLowerCase())).size).toBe(100)
     for (const p of all) {
       expect(p.id).toMatch(/^[a-z]+-[a-z0-9-]+$/)
       expect(p.id.startsWith(`${p.collection}-`)).toBe(true)
@@ -62,10 +61,8 @@ describe('catalog', () => {
     }
   })
 
-  it('stays within every slider range at 200 % on RAW and JPEG, in every variation', () => {
+  it('stays within every slider range at 200 % on RAW and JPEG', () => {
     const bases: [SourceKind, EditRecipe][] = [['display', defaultRecipe('display')], ['raw', defaultRecipe('raw', { temp: 5200, tint: 8 })]]
-    for (const p of all)
-      for (const v of VARIATIONS)
-        for (const [kind, base] of bases) expect(inRange(applyPreset(base, p, 200, v.id, kind), kind), `${p.id} ${v.id} ${kind}`).toEqual([])
+    for (const p of all) for (const [kind, base] of bases) expect(inRange(applyPreset(base, p, 200, 'original', kind), kind), `${p.id} ${kind}`).toEqual([])
   })
 })

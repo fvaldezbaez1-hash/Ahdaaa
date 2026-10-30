@@ -2,16 +2,13 @@
 // photo's own corrections (white balance moves relative to the photo's, sliders
 // add to what's there, curves bend what's there), scaled by Amount 0…200 %.
 // Everything the look changes is recorded on `recipe.look`, so a new amount,
-// variation or look first takes the old one off instead of stacking on it.
+// or another look first takes the old one off instead of stacking on it.
 
 import { curveLut, isIdentity, normalizeCurve, type CurvePoint } from '../color/curve'
 import { shiftWb } from '../color/wb'
 import { SPECS } from '../edit/defaults'
 import { getPath, setPath } from '../edit/path'
-import { BANDS, type EditRecipe, type LookValue, type Preset, type PresetData, type SourceKind, type Variation, type Wheel } from '../edit/types'
-
-/** "Stronger" = the look's deltas × this. */
-export const STRONGER = 1.35
+import { BANDS, type EditRecipe, type LookValue, type Preset, type SourceKind, type Variation, type Wheel } from '../edit/types'
 
 const WHEELS = ['shadows', 'midtones', 'highlights', 'global'] as const
 const MIXER_GROUPS = ['hue', 'sat', 'lum', 'bw'] as const
@@ -76,47 +73,6 @@ function addWheel(base: Wheel, look: Wheel, k: number): Wheel {
   return { hue: sat < 0.5 ? base.hue : (Math.atan2(y, x) * 180) / Math.PI, sat, lum: base.lum + k * look.lum }
 }
 
-const warm: Wheel = { hue: 40, sat: 5, lum: 0 }
-const cool: Wheel = { hue: 215, sat: 5, lum: 0 }
-const nudge = (w: Wheel | undefined, by: Wheel, scale = 1): Wheel => addWheel(w ?? { hue: 0, sat: 0, lum: 0 }, by, scale)
-
-/** The look's own data reshaped for a variation ("stronger" is a scale, applied later). */
-export function variationData(d: PresetData, v: Variation): PresetData {
-  if (v === 'original' || v === 'stronger') return d
-  const bw = d.treatment === 'bw'
-  const g = { ...d.grading }
-  if (v === 'warmer' || v === 'cooler') {
-    const w = v === 'warmer' ? warm : cool
-    const sign = v === 'warmer' ? 1 : -1
-    // Monochrome ignores white balance, so B&W looks tone the print instead.
-    if (bw) {
-      g.highlights = nudge(g.highlights, w, 1.6)
-      g.shadows = nudge(g.shadows, w, 1.2)
-      return { ...d, grading: g }
-    }
-    if (v === 'warmer') g.highlights = nudge(g.highlights, w)
-    else g.shadows = nudge(g.shadows, w)
-    return { ...d, wbShift: { temp: (d.wbShift?.temp ?? 0) + 15 * sign, tint: (d.wbShift?.tint ?? 0) + 2 * sign }, grading: g }
-  }
-  // Softer: less contrast and bite, a little fade, a touch less color.
-  const b = { ...d.basic }
-  const mul = (k: keyof typeof b, f: number, add = 0) => {
-    b[k] = (b[k] ?? 0) * f + add
-  }
-  mul('contrast', 0.6, -8)
-  mul('clarity', 0.5, -4)
-  mul('texture', 0.5)
-  mul('dehaze', 0.5)
-  mul('whites', 0.6)
-  mul('blacks', 0.6, 4)
-  mul('vibrance', 0.85)
-  mul('saturation', 1, bw ? 0 : -6)
-  for (const k of WHEELS) if (g[k]) g[k] = { ...g[k]!, sat: g[k]!.sat * 0.8 }
-  const curve = Object.fromEntries(Object.entries(d.curve ?? {}).map(([k, p]) => [k, p && scaleCurve(p, 0.6)]))
-  const e = d.effects ?? {}
-  return { ...d, basic: b, grading: g, curve, effects: { ...e, fade: (e.fade ?? 0) + 8, vignette: (e.vignette ?? 0) * 0.7 } }
-}
-
 class Writer {
   r: EditRecipe
   readonly base: EditRecipe
@@ -156,18 +112,19 @@ export function stripLook(r: EditRecipe): EditRecipe {
 }
 
 /**
- * Apply a look to a recipe. `amount` is 0…200 (%). Keeps crop/geometry and
- * anything the preset doesn't set. White balance shifts relative to the
- * recipe's current values. Records `look` on the result.
+ * Apply a look to a recipe. `amount` is 0…200 (%): below 100 is a softer take,
+ * above it a stronger one. Keeps crop/geometry and anything the preset doesn't
+ * set. White balance shifts relative to the recipe's current values. Records
+ * `look` on the result. (`_variation` is kept for existing callers; looks no
+ * longer come in variations.)
  */
-export function applyPreset(recipe: EditRecipe, preset: Preset, amount: number, variation: Variation, kind: SourceKind): EditRecipe {
+export function applyPreset(recipe: EditRecipe, preset: Preset, amount: number, _variation: Variation, kind: SourceKind): EditRecipe {
   const base = stripLook(recipe)
-  const a = Math.min(200, Math.max(0, amount)) / 100
-  const k = variation === 'stronger' ? a * STRONGER : a
-  const d = variationData(preset.data, variation)
+  const k = Math.min(200, Math.max(0, amount)) / 100
+  const d = preset.data
   const w = new Writer(base, kind)
 
-  if (a > 0) {
+  if (k > 0) {
     if (d.profile && d.profile !== base.profile) w.put('profile', d.profile)
     if (d.treatment && d.treatment !== base.treatment) w.put('treatment', d.treatment)
     const ws = d.wbShift
@@ -210,7 +167,7 @@ export function applyPreset(recipe: EditRecipe, preset: Preset, amount: number, 
       presetId: preset.id,
       name: preset.name,
       amount: Math.round(amount),
-      variation,
+      variation: 'original',
       base: Object.fromEntries(w.before),
       set: Object.fromEntries(changed.map((p) => [p, getPath(w.r, p) as LookValue])),
     },

@@ -28,37 +28,12 @@ export const portrait: CollectionDef = {
       mixer: { sat: { orange: 8 }, lum: { orange: 4 } },
       grading: { shadows: w(210, 12) },
     }),
-    look('soft-light', 'Soft Light', 'Diffused, low-contrast light with smooth skin.', ['portrait', 'soft', 'bright', 'low contrast'], {
-      basic: { exposure: 0.1, contrast: -16, highlights: -30, shadows: 20, texture: -14, clarity: -10, saturation: -6 },
-      curve: { rgb: tc(0.04, 0, 0.03) },
-      grading: { highlights: w(35, 8) },
-    }),
-    look('studio-clean', 'Studio Clean', 'Crisp whites and neutral color for studio and headshots.', ['portrait', 'studio', 'clean', 'neutral'], {
-      wbShift: { temp: -2, tint: 0 },
-      basic: { contrast: 6, highlights: -10, whites: 10, blacks: -6, texture: -6, vibrance: 4 },
-      curve: { rgb: tc(0, 0.015) },
-      mixer: { sat: { orange: -4 }, lum: { orange: 4 } },
-    }),
-    look('golden-skin', 'Golden Skin', 'A golden cast in the light tones that flatters every complexion.', ['portrait', 'warm', 'golden', 'skin'], {
-      wbShift: { temp: 7, tint: 1 },
-      basic: { contrast: 4 },
-      curve: { rgb: tc(0.02, 0.015) },
-      mixer: { sat: { orange: 4 }, lum: { orange: 6 } },
-      grading: { midtones: w(35, 12), highlights: w(45, 15) },
-    }),
     look('porcelain', 'Porcelain', 'Bright, cool and luminous, with lightened skin and quiet color.', ['portrait', 'bright', 'cool', 'beauty'], {
       wbShift: { temp: -4, tint: 2 },
       basic: { exposure: 0.1, highlights: -20, shadows: 14, texture: -12, saturation: -14 },
       curve: { rgb: tc(0.03, 0, 0, 0.02) },
       mixer: { sat: { orange: -10, red: -8 }, lum: { orange: 12, red: 6 } },
       grading: { highlights: w(330, 6) },
-    }),
-    look('rosy', 'Rosy', 'A hint of pink in the highlights for a fresh, healthy flush.', ['portrait', 'pink', 'soft', 'romantic'], {
-      wbShift: { temp: 4, tint: 6 },
-      basic: { contrast: -4 },
-      curve: { rgb: tc(0.03, 0.01, 0.02) },
-      mixer: { sat: { red: 4 }, lum: { red: 4 } },
-      grading: { midtones: w(10, 6), highlights: w(345, 15) },
     }),
     look('bronze', 'Bronze', 'Rich, tanned tones with depth and a dark edge.', ['portrait', 'warm', 'rich', 'contrast'], {
       wbShift: { temp: 8, tint: -1 },
@@ -67,13 +42,6 @@ export const portrait: CollectionDef = {
       mixer: { hue: { orange: -2 }, sat: { orange: 8 }, lum: { orange: -6 } },
       grading: { shadows: w(25, 15), highlights: w(40, 12) },
       effects: { vignette: -12 },
-    }),
-    look('window-light', 'Window Light', 'Quiet, directional mood: deeper shadows and a falloff to the edges.', ['portrait', 'moody', 'low key', 'natural light'], {
-      wbShift: { temp: -2, tint: 0 },
-      basic: { exposure: -0.06, contrast: 10, highlights: -20, shadows: -8, saturation: -8 },
-      curve: { rgb: tc(0.03, 0.02, 0.02, -0.02) },
-      grading: { shadows: w(220, 9) },
-      effects: { vignette: -22 },
     }),
   ],
 }

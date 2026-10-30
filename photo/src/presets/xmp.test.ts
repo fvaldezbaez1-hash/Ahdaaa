@@ -121,7 +121,7 @@ describe('parseXmp', () => {
 
 describe('toXmp', () => {
   it('round-trips a built-in look', () => {
-    for (const id of ['film-warm-400', 'bw-infrared-mono', 'vintage-cross-process', 'creative-split-tone']) {
+    for (const id of ['film-warm-400', 'film-expired', 'bw-infrared-mono', 'vintage-cross-process', 'creative-split-tone']) {
       const p = findBuiltin(id)!
       const back = parseXmp(toXmp(p.name, p.data, '6f1c0d8e-0000-4000-8000-000000000000'))
       expect(back.name).toBe(p.name)

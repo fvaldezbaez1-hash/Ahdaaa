@@ -17,3 +17,16 @@ export function approxFilter(d: PresetData): string {
   if (temp < 0) parts.push(`hue-rotate(${Math.max(-12, temp * 0.4).toFixed(1)}deg)`)
   return parts.join(' ')
 }
+
+/** A color swatch for a look when there's no photo to preview it on: its shadow and highlight tones. */
+export function swatch(d: PresetData): string {
+  const g = d.grading ?? {}
+  const temp = d.wbShift?.temp ?? 0
+  const bw = d.treatment === 'bw'
+  const tone = (w: { hue: number; sat: number } | undefined, light: number) => {
+    const hue = w?.sat ? w.hue : temp >= 0 ? 35 : 215
+    const sat = bw && !w?.sat ? 0 : Math.min(70, (w?.sat ?? 0) * 1.6 + Math.abs(temp) * 1.2 + (bw ? 0 : 12))
+    return `hsl(${Math.round(hue)} ${Math.round(sat)}% ${light}%)`
+  }
+  return `linear-gradient(135deg, ${tone(g.shadows ?? g.midtones, 24)}, ${tone(g.highlights ?? g.midtones, 74)})`
+}

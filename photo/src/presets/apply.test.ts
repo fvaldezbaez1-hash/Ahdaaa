@@ -4,7 +4,7 @@ import { shiftWb } from '../color/wb'
 import { defaultRecipe, SPECS } from '../edit/defaults'
 import { getPath, setPath } from '../edit/path'
 import type { EditRecipe, Preset } from '../edit/types'
-import { applyPreset, scaleCurve, STRONGER, stripLook, variationData } from './apply'
+import { applyPreset, scaleCurve, stripLook } from './apply'
 
 const look: Preset = {
   id: 'test-look',
@@ -67,7 +67,7 @@ describe('applyPreset', () => {
 
   it('clamps to the slider ranges', () => {
     const base = setPath(jpeg(), 'basic.contrast', 90)
-    const r = applyPreset(base, look, 200, 'stronger', 'display')
+    const r = applyPreset(base, look, 200, 'original', 'display')
     expect(r.basic.contrast).toBe(SPECS['basic.contrast'].max)
     for (const v of r.curve.rgb) expect(v.y).toBeGreaterThanOrEqual(0)
   })
@@ -76,7 +76,7 @@ describe('applyPreset', () => {
     let r = applyPreset(jpeg(), look, 100, 'original', 'display')
     r = applyPreset(r, look, 100, 'original', 'display')
     expect(r.basic.contrast).toBe(20)
-    r = applyPreset(r, look, 40, 'warmer', 'display')
+    r = applyPreset(r, look, 40, 'original', 'display')
     r = applyPreset(r, look, 100, 'original', 'display')
     expect(without(r)).toBe(without(applyPreset(jpeg(), look, 100, 'original', 'display')))
   })
@@ -123,34 +123,10 @@ describe('applyPreset', () => {
 
   it('records only what changed and restores it exactly', () => {
     const base = raw()
-    const r = applyPreset(base, look, 137, 'cooler', 'raw')
+    const r = applyPreset(base, look, 137, 'original', 'raw')
     expect(Object.keys(r.look?.base ?? {})).toContain('basic.contrast')
     for (const [path, v] of Object.entries(r.look?.set ?? {})) expect(getPath(r, path)).toEqual(v)
     expect(stripLook(r)).toEqual(base)
-  })
-})
-
-describe('variations', () => {
-  const at = (v: Parameters<typeof applyPreset>[3]) => applyPreset(jpeg(), look, 100, v, 'display')
-  it('warmer and cooler move white balance about ±15 with a grading nudge', () => {
-    expect(at('warmer').wb.temp).toBe(25)
-    expect(at('cooler').wb.temp).toBe(-5)
-    expect(at('warmer').grading.highlights.sat).toBeGreaterThan(0)
-    expect(at('cooler').grading.shadows.hue).not.toBe(200)
-  })
-  it('softer lowers contrast and saturation and adds fade', () => {
-    const s = at('softer')
-    expect(s.basic.contrast).toBeLessThan(20)
-    expect(s.basic.saturation).toBeLessThan(-10)
-    expect(s.effects.fade).toBeGreaterThan(0)
-  })
-  it('stronger scales the deltas by 1.35', () => {
-    expect(at('stronger').basic.contrast).toBe(Math.round(20 * STRONGER))
-  })
-  it('tones black & white looks instead of moving white balance', () => {
-    const d = variationData(mono.data, 'warmer')
-    expect(d.wbShift).toBeUndefined()
-    expect(d.grading?.highlights?.sat).toBeGreaterThan(0)
   })
 })
 

@@ -19,7 +19,7 @@ export function Welcome({ phone, onImport, onImportFolder }: { phone: boolean; o
             Welcome to Lumen
           </h1>
           <p className="lead">
-            A professional photo editor that lives on your device. Develop RAW files with pro tools on your GPU, then finish with 1,000 presets or the AI assistant.
+            A professional photo editor that lives on your device. Develop RAW files with pro tools on your GPU, then finish with 100 hand-made presets.
           </p>
         </div>
         <ul className="welcome-points">

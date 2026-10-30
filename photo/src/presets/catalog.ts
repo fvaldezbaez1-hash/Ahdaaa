@@ -1,5 +1,4 @@
-// The built-in catalog: 20 collections × 10 looks = 200 looks, and with the
-// 5 variations, 1,000 presets. User, AI and Lightroom presets live in the
+// The built-in catalog: 20 collections × 5 hand-made looks = 100 presets. User, AI and Lightroom presets live in the
 // database (db.presets). How a look applies is in apply.ts.
 import type { Preset, Variation } from '../edit/types'
 import type { CollectionDef } from './data/kit'
@@ -33,13 +32,8 @@ export interface Collection {
   presetIds: string[]
 }
 
-export const VARIATIONS: { id: Variation; label: string; short: string }[] = [
-  { id: 'original', label: 'Original', short: 'Orig' },
-  { id: 'warmer', label: 'Warmer', short: 'Warm' },
-  { id: 'cooler', label: 'Cooler', short: 'Cool' },
-  { id: 'softer', label: 'Softer', short: 'Soft' },
-  { id: 'stronger', label: 'Stronger', short: 'Bold' },
-]
+/** Looks no longer come in variations (Amount covers softer and stronger); kept for existing callers. */
+export const VARIATIONS: { id: Variation; label: string }[] = [{ id: 'original', label: 'Original' }]
 
 const DEFS: CollectionDef[] = [
   essentials, film, portrait, landscape, bw, cinematic, street, travel, food, wedding,
@@ -60,7 +54,7 @@ const PRESETS: Preset[] = DEFS.flatMap((c) =>
 const BY_ID = new Map(PRESETS.map((p) => [p.id, p]))
 const COLLECTIONS: Collection[] = DEFS.map((c) => ({ id: c.id, name: c.name, description: c.description, presetIds: c.looks.map((l) => `${c.id}-${l.slug}`) }))
 
-/** Built-in collections (200 looks; ×5 variations = 1,000 presets). */
+/** Built-in collections (20 × 5 = 100 looks). */
 export function collections(): Collection[] {
   return COLLECTIONS
 }
@@ -77,3 +71,12 @@ export function findBuiltin(id: string): Preset | undefined {
 export function collectionName(id: string): string {
   return id === 'mine' ? 'My presets' : id === 'lightroom' ? 'From Lightroom' : (COLLECTIONS.find((c) => c.id === id)?.name ?? id)
 }
+
+/** Does a look match every search term (name, collection, description, tags)? */
+export function lookMatches(p: Preset, terms: readonly string[]): boolean {
+  if (!terms.length) return true
+  const text = `${p.name} ${collectionName(p.collection)} ${p.description ?? ''} ${(p.tags ?? []).join(' ')}`.toLowerCase()
+  return terms.every((t) => text.includes(t))
+}
+
+export const searchTerms = (q: string) => q.toLowerCase().split(/\s+/).filter(Boolean)

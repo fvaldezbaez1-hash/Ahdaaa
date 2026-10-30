@@ -92,6 +92,9 @@ export interface Suggestion {
   reason: string
 }
 
+/** Score lost for each earlier pick with the same reason, so the list covers more than one idea. */
+const REPEAT = 1.2
+
 /** The looks that suit the photo best, at most `perCollection` from one collection. */
 export function suggestLooks(stats: PhotoStats, presets: readonly Preset[], count = 12, perCollection = 2): Suggestion[] {
   const weights = TRAITS.map((t) => t.weight(stats))
@@ -111,15 +114,24 @@ export function suggestLooks(stats: PhotoStats, presets: readonly Preset[], coun
     if (p.collection === 'essentials') score += 0.5
     return { p, score, reason, order }
   })
-  scored.sort((a, b) => b.score - a.score || a.order - b.order)
   const per = new Map<string, number>()
+  const reasons = new Map<string, number>()
   const out: Suggestion[] = []
-  for (const s of scored) {
-    const c = per.get(s.p.collection) ?? 0
-    if (c >= perCollection) continue
-    per.set(s.p.collection, c + 1)
-    out.push({ preset: s.p, reason: s.reason })
-    if (out.length >= count) break
+  while (out.length < count) {
+    let best: (typeof scored)[number] | undefined, bestValue = -Infinity
+    for (const s of scored) {
+      if ((per.get(s.p.collection) ?? 0) >= perCollection) continue
+      const v = s.score - REPEAT * (reasons.get(s.reason) ?? 0)
+      if (v > bestValue || (v === bestValue && best && s.order < best.order)) {
+        best = s
+        bestValue = v
+      }
+    }
+    if (!best) break
+    scored.splice(scored.indexOf(best), 1)
+    per.set(best.p.collection, (per.get(best.p.collection) ?? 0) + 1)
+    reasons.set(best.reason, (reasons.get(best.reason) ?? 0) + 1)
+    out.push({ preset: best.p, reason: best.reason })
   }
   return out
 }

@@ -8,7 +8,9 @@ import { BANDS, type EditRecipe, type Preset, type PresetData, type SourceKind }
 import { db, uid } from '../io/db'
 import type { UserPresetRecord } from '../io/types'
 import { updateSettings, useSettings } from '../state/settings'
+import { toast } from '../ui/toast'
 import { findBuiltin } from './catalog'
+import { toXmp } from './xmp'
 
 export function useFavorites(): ReadonlySet<string> {
   const ids = useSettings()?.favoritePresets
@@ -112,4 +114,16 @@ export function presetFromRecipe(r: EditRecipe, kind: SourceKind, asShot: { temp
     if (Object.keys(effects).length) d.effects = effects
   }
   return d
+}
+
+/** Download a preset as a Lightroom-compatible .xmp file. */
+export function exportXmp(p: Preset) {
+  const blob = new Blob([toXmp(p.name, p.data, uid())], { type: 'application/rdf+xml' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${p.name.replace(/[\\/:*?"<>|]+/g, '-')}.xmp`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  toast(`Exported “${p.name}” for Lightroom`)
 }

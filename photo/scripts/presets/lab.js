@@ -6,7 +6,7 @@ import { boxReduce } from '/src/engine/image.ts'
 import { defaultRecipe } from '/src/edit/defaults.ts'
 import { mat3 } from '/src/color/matrices.ts'
 import { tempTintFromMultipliers } from '/src/color/wb.ts'
-import { applyPreset, builtinPresets, collections, VARIATIONS } from '/src/presets/catalog.ts'
+import { applyPreset, builtinPresets, collections } from '/src/presets/catalog.ts'
 
 const photos = {}
 const canvas = document.createElement('canvas')
@@ -95,12 +95,11 @@ function collectionSheet(id, names) {
   return sheet(rows, names)
 }
 
-/** One look: amounts and variations. */
+/** One look at several amounts. */
 function lookSheet(id, names) {
   const p = builtinPresets().find((x) => x.id === id)
   const rows = [{ label: 'Original', recipe: base }]
-  for (const a of [50, 100, 200]) rows.push({ label: `${p.name} ${a}%`, recipe: (n) => applyPreset(base(n), p, a, 'original', photos[n].color.kind) })
-  for (const v of VARIATIONS.slice(1)) rows.push({ label: `${p.name}\n${v.label}`, recipe: (n) => applyPreset(base(n), p, 100, v.id, photos[n].color.kind) })
+  for (const a of [50, 100, 150, 200]) rows.push({ label: `${p.name} ${a}%`, recipe: (n) => applyPreset(base(n), p, a, 'original', photos[n].color.kind) })
   return sheet(rows, names)
 }
 
