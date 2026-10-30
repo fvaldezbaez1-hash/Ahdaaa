@@ -4,7 +4,7 @@
 // and takes screenshots (desktop 1440×900, phone 390×844, dark and light).
 //
 // Usage (from photo/): node scripts/editor/check.mjs <jpeg dir> <raw file> [screenshot dir] [phase…]
-// Phases: desktop phone states raw (default: all)
+// Phases: desktop phone states raw masks masksPhone (default: all)
 import { createServer } from 'vite'
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
@@ -16,7 +16,7 @@ const ROOT = resolve(import.meta.dirname, '../..')
 const ASSETS = resolve(process.argv[2] ?? '.')
 const RAW = process.argv[3] ? resolve(process.argv[3]) : null
 const OUT = resolve(process.argv[4] ?? join(tmpdir(), 'lumen-editor-check'))
-const PHASES = process.argv.slice(5).length ? process.argv.slice(5) : ['desktop', 'phone', 'states', 'raw']
+const PHASES = process.argv.slice(5).length ? process.argv.slice(5) : ['desktop', 'phone', 'states', 'raw', 'masks', 'masksPhone']
 const PORT = 5204
 const URL = `http://localhost:${PORT}/`
 mkdirSync(OUT, { recursive: true })
@@ -66,7 +66,10 @@ const state = (page) =>
     const { view } = await import('/src/editor/view.ts')
     const s = editor.getState()
     const v = view.get()
-    return { photoId: s.photoId, recipe: s.recipe, history: s.history.map((h) => h.label), canUndo: s.canUndo, canRedo: s.canRedo, mode: v.mode, tool: v.tool, zoom: v.zoom, sheet: v.sheet, hist: !!v.histogram }
+    return {
+      photoId: s.photoId, recipe: s.recipe, history: s.history.map((h) => h.label), canUndo: s.canUndo, canRedo: s.canRedo, mode: v.mode, tool: v.tool, zoom: v.zoom, sheet: v.sheet, hist: !!v.histogram,
+      layer: v.layer, mask: v.mask, overlay: v.overlay, placing: v.placing, rangePick: v.rangePick, spot: v.spot,
+    }
   })
 
 const stored = (page, id) => page.evaluate(async (id) => (await (await import('/src/io/db.ts')).db.photos.get(id))?.recipe, id)
@@ -416,11 +419,266 @@ async function raw() {
   await page.context().close()
 }
 
+/** Drag with the mouse in a few steps (optionally holding Alt). */
+async function drag(page, from, to, { steps = 6, alt = false } = {}) {
+  if (alt) await page.keyboard.down('Alt')
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  for (let i = 1; i <= steps; i++) await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps)
+  await page.mouse.up()
+  if (alt) await page.keyboard.up('Alt')
+}
+
+const center = async (loc) => {
+  const b = await loc.boundingBox()
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+}
+
+/** Point at fractions (fx, fy) of the photo on screen. */
+const onPhoto = async (page, fx, fy) => {
+  const b = await page.locator('.ed-photo').boundingBox()
+  return { x: b.x + b.width * fx, y: b.y + b.height * fy }
+}
+
+const selectedMask = (s) => s.recipe.layers.find((l) => l.id === s.layer)?.masks.find((m) => m.id === s.mask)
+
+/** How far (px) the selected radial's center handle is from where the engine's geometry puts the mask center. */
+const handleError = (page) =>
+  page.evaluate(async () => {
+    const { editor } = await import('/src/state/editor.ts')
+    const { view } = await import('/src/editor/view.ts')
+    const { maskToView } = await import('/src/engine/geometry.ts')
+    const { db } = await import('/src/io/db.ts')
+    const r = editor.getState().recipe
+    const v = view.get()
+    const m = r.layers.find((l) => l.id === v.layer).masks.find((x) => x.id === v.mask)
+    const rec = await db.photos.get(editor.getState().photoId)
+    const p = maskToView({ width: rec.width, height: rec.height }, r.geometry, false, m.cx, m.cy)
+    const box = document.querySelector('.ed-photo').getBoundingClientRect()
+    const h = document.querySelector('.ed-mh.move').getBoundingClientRect()
+    return Math.hypot(h.left + h.width / 2 - (box.left + p.x * box.width), h.top + h.height / 2 - (box.top + p.y * box.height))
+  })
+
+async function masks() {
+  console.log('masks')
+  const page = await open({ width: 1440, height: 900 })
+  const ids = await importPhotos(page, ['/__assets/photo-21.jpg', '/__assets/photo-06.jpg'])
+  const id = ids[0]
+  await openEditor(page, id)
+  const clean = await photoPixels(page)
+
+  // M opens masking; with no masks yet the kinds are offered right away.
+  await page.keyboard.press('m')
+  let s = await state(page)
+  check(s.tool === 'mask', 'M opens the masking tool')
+  check(await page.getByRole('button', { name: 'Subject' }).isDisabled(), 'AI masks are listed as coming soon')
+  await shot(page, 'masks-empty')
+
+  // Radial: draw it on the photo, then reshape with its handles.
+  await page.getByRole('button', { name: 'Radial gradient' }).click()
+  s = await state(page)
+  check(s.placing === 'radial' && s.recipe.layers.length === 1, 'new radial layer waits to be drawn')
+  await drag(page, await onPhoto(page, 0.45, 0.4), await onPhoto(page, 0.6, 0.4))
+  s = await state(page)
+  let m = selectedMask(s)
+  check(s.placing === null && Math.abs(m.cx - 0.45) < 0.01 && m.rx > 0.1, `drawn radial at ${m.cx.toFixed(3)}, r ${m.rx.toFixed(3)}`)
+  check(s.history[0] === 'Radial gradient', `one undo step "${s.history[0]}"`)
+  check((await handleError(page)) < 1.5, 'center handle sits on the mask center (fit)')
+  const rx0 = m.rx
+  const hx = await center(page.locator('.ed-mh.rx'))
+  await drag(page, hx, { x: hx.x + 40, y: hx.y })
+  m = selectedMask(await state(page))
+  check(m.rx > rx0 + 0.02, `rx handle widens the ellipse (${rx0.toFixed(3)} → ${m.rx.toFixed(3)})`)
+  const knob = await center(page.locator('.ed-mh.rotate'))
+  const c0 = await center(page.locator('.ed-mh.move'))
+  await drag(page, knob, { x: c0.x + (c0.y - knob.y), y: c0.y })
+  m = selectedMask(await state(page))
+  check(Math.abs(Math.abs(m.angle) - 90) < 3, `rotate handle turns it (${m.angle}°)`)
+  await drag(page, c0, { x: c0.x - 60, y: c0.y + 30 })
+  s = await state(page)
+  m = selectedMask(s)
+  check(m.cx < 0.45 && s.history[0] === 'Move radial gradient', `dragging inside moves it ("${s.history[0]}")`)
+
+  // Local adjustment + overlay.
+  await dragSlider(page, 'Exposure', -0.15)
+  s = await state(page)
+  const layer = s.recipe.layers[0]
+  check(layer.adjust.exposure < -0.3, `local exposure ${layer.adjust.exposure}`)
+  check(/^Radial: Exposure −/.test(s.history[0]), `history "${s.history[0]}"`)
+  console.log(`       info: local exposure ${(await photoPixels(page)) !== clean ? 'changes' : 'does not change yet'} the pixels`)
+  await page.locator('.ed-stage').hover({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('o')
+  check((await state(page)).overlay === false, 'O hides the overlay')
+  await page.keyboard.press('o')
+  await shot(page, 'masks-radial')
+
+  // Handles track zoom (100 %) and a crop with a quarter turn.
+  await page.keyboard.press('z')
+  await page.waitForTimeout(400)
+  check((await handleError(page)) < 1.5, 'center handle stays on the mask at 100 %')
+  await page.keyboard.press('z')
+  await page.evaluate(async () => {
+    const { editor } = await import('/src/state/editor.ts')
+    editor.apply((r) => ({ ...r, geometry: { ...r.geometry, rotate: 1, crop: { x: 0.1, y: 0.05, w: 0.8, h: 0.9 }, angle: 4 } }), 'test crop')
+  })
+  await page.waitForTimeout(300)
+  check((await handleError(page)) < 1.5, 'center handle stays on the mask after crop + quarter turn + straighten')
+  await shot(page, 'masks-rotated')
+  await page.keyboard.press('Control+z')
+
+  // Linear: drawn by dragging, end handle reshapes.
+  await page.getByRole('button', { name: 'New mask' }).click()
+  await page.getByRole('button', { name: 'Linear gradient' }).click()
+  await drag(page, await onPhoto(page, 0.5, 0.05), await onPhoto(page, 0.5, 0.45))
+  s = await state(page)
+  m = selectedMask(s)
+  check(m.type === 'linear' && m.y1 < 0.1 && m.y2 > 0.4, `linear drawn top → middle (${m.y1.toFixed(2)} → ${m.y2.toFixed(2)})`)
+  const end = await center(page.locator('.ed-mh.end'))
+  await drag(page, end, { x: end.x + 80, y: end.y + 20 })
+  m = selectedMask(await state(page))
+  check(m.x2 > 0.55, 'end handle tilts the gradient')
+  await shot(page, 'masks-linear')
+
+  // Brush: paint, erase with Alt, undo/redo.
+  await page.getByRole('button', { name: 'New mask' }).click()
+  await page.getByRole('button', { name: 'Brush', exact: true }).click()
+  await drag(page, await onPhoto(page, 0.2, 0.7), await onPhoto(page, 0.6, 0.75), { steps: 12 })
+  s = await state(page)
+  m = selectedMask(s)
+  check(m.strokes.length === 1 && m.strokes[0].points.length > 4 && s.history[0] === 'Brush mask', `brush stroke with ${m.strokes[0]?.points.length} points, one step`)
+  await drag(page, await onPhoto(page, 0.3, 0.72), await onPhoto(page, 0.4, 0.72), { alt: true })
+  s = await state(page)
+  m = selectedMask(s)
+  check(m.strokes[1]?.erase === true && s.history[0] === 'Erase brush mask', 'Alt-drag erases')
+  await page.keyboard.press(']')
+  check((await page.evaluate(async () => (await import('/src/editor/view.ts')).view.get().brush.size)) === 55, '] enlarges the brush')
+  await page.keyboard.press('Control+z')
+  m = selectedMask(await state(page))
+  check(m.strokes.length === 1, 'undo removes the erase stroke')
+  await page.keyboard.press('Control+Shift+z')
+  m = selectedMask(await state(page))
+  check(m.strokes.length === 2, 'redo brings it back')
+  await page.mouse.move(...Object.values(await onPhoto(page, 0.5, 0.5)))
+  await shot(page, 'masks-brush')
+
+  // Subtract a luminance range from the brush layer; invert it.
+  await page.getByRole('button', { name: 'Subtract', exact: true }).click()
+  await page.getByRole('button', { name: 'Luminance range' }).click()
+  s = await state(page)
+  const lay = s.recipe.layers.find((l) => l.id === s.layer)
+  check(lay.masks.length === 2 && lay.masks[1].mode === 'subtract' && lay.masks[1].range === 'luminance', 'luminance range subtracted from the brush layer')
+  await page.getByRole('button', { name: 'Invert Luminance range' }).click()
+  check(selectedMask(await state(page)).invert === true, 'invert toggles')
+  await page.getByRole('slider', { name: 'Darkest', exact: true }).focus()
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowRight')
+  check(selectedMask(await state(page)).low === 65, 'range slider moves the darkest end')
+
+  // Color range: pick from the sky.
+  await page.getByRole('button', { name: 'New mask' }).click()
+  await page.getByRole('button', { name: 'Color range' }).click()
+  check((await state(page)).rangePick, 'a color range starts with the picker')
+  await page.mouse.click(...Object.values(await onPhoto(page, 0.15, 0.12)))
+  m = selectedMask(await state(page))
+  check(m.hue > 180 && m.hue < 250, `picked the sky's hue (${m.hue}°, sat ${m.sat})`)
+  await shot(page, 'masks-panel')
+
+  // Layer menu: rename, hide, duplicate, delete.
+  const rows = () => page.locator('.ed-layer')
+  const before = (await state(page)).recipe.layers.length
+  await page.locator('.ed-layer-name').first().dblclick()
+  await page.getByLabel('Mask name').fill('Sky')
+  await page.keyboard.press('Enter')
+  s = await state(page)
+  check(s.recipe.layers.some((l) => l.name === 'Sky'), 'double-click renames a layer')
+  await page.getByRole('button', { name: 'Hide Sky' }).click()
+  check((await state(page)).recipe.layers.find((l) => l.name === 'Sky').enabled === false, 'eye hides a layer')
+  await page.getByRole('button', { name: 'More for Sky' }).click()
+  await page.getByRole('button', { name: 'Duplicate', exact: true }).click()
+  check((await state(page)).recipe.layers.length === before + 1 && (await rows().count()) === before + 1, 'duplicate adds a layer')
+  await page.getByRole('button', { name: 'More for Sky copy' }).click()
+  await page.getByRole('button', { name: 'Delete', exact: true }).click()
+  check((await state(page)).recipe.layers.length === before, 'delete removes it')
+
+  // Persistence.
+  await page.waitForTimeout(700)
+  const saved = await stored(page, id)
+  check(saved?.layers.length === before && saved.layers.some((l) => l.name === 'Sky'), 'layers saved to the database')
+
+  // Heal & clone.
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('q')
+  check((await state(page)).tool === 'heal', 'Q opens heal & clone')
+  await page.mouse.click(...Object.values(await onPhoto(page, 0.3, 0.3)))
+  s = await state(page)
+  check(s.recipe.retouch.length === 1 && s.history[0] === 'Heal spot', 'click adds a heal spot')
+  const sp = s.recipe.retouch[0]
+  check(Math.hypot(sp.sx - sp.x, sp.sy - sp.y) > sp.r, `it copies from elsewhere (${sp.sx.toFixed(3)}, ${sp.sy.toFixed(3)})`)
+  await drag(page, await onPhoto(page, 0.6, 0.85), await onPhoto(page, 0.9, 0.85), { steps: 15 })
+  s = await state(page)
+  check(s.recipe.retouch.length > 3 && s.history[0] === 'Heal stroke', `drag paints ${s.recipe.retouch.length - 1} spots in one step`)
+  await page.keyboard.press('Control+z')
+  check((await state(page)).recipe.retouch.length === 1, 'one undo removes the whole stroke')
+  const t = await onPhoto(page, 0.3, 0.3)
+  await drag(page, t, { x: t.x + 30, y: t.y + 20 })
+  s = await state(page)
+  check(s.recipe.retouch[0].x > sp.x && s.history[0] === 'Move heal spot', 'dragging a spot moves it')
+  await page.getByRole('radio', { name: 'Clone' }).or(page.getByRole('button', { name: 'Clone', exact: true })).first().click()
+  check((await state(page)).recipe.retouch[0].mode === 'clone', 'switching to Clone changes the selected spot')
+  await shot(page, 'heal')
+  await page.keyboard.press('Backspace')
+  check((await state(page)).recipe.retouch.length === 0, 'Backspace deletes the selected spot')
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(700)
+  check((await stored(page, id))?.retouch.length === 1, 'heal spots saved to the database')
+
+  await setTheme(page, 'light')
+  await shot(page, 'heal-light')
+  await page.keyboard.press('m')
+  await shot(page, 'masks-light')
+  await setTheme(page, 'dark')
+  await page.keyboard.press('Escape')
+  await shot(page, 'masks-summary')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
+async function masksPhone() {
+  console.log('masksPhone')
+  const page = await open({ width: 390, height: 844 }, true)
+  const [id] = await importPhotos(page, ['/__assets/photo-21.jpg'])
+  await openEditor(page, id)
+  const tap = (name) => page.getByRole('button', { name, exact: true }).tap()
+  await page.locator('.ed-phone-tools').evaluate((el) => (el.scrollLeft = 400))
+  await tap('Masks')
+  check((await state(page)).tool === 'mask', 'Masks tool on the phone')
+  await shot(page, 'phone-masks-empty')
+  await tap('Radial gradient')
+  await drag(page, await onPhoto(page, 0.5, 0.5), await onPhoto(page, 0.7, 0.5))
+  let s = await state(page)
+  check(s.recipe.layers.length === 1 && s.history[0] === 'Radial gradient', 'radial drawn with one finger')
+  await shot(page, 'phone-masks')
+  await page.locator('.ed-phone-panel-body').evaluate((el) => (el.scrollTop = 600))
+  await shot(page, 'phone-masks-sliders')
+  await tap('Heal')
+  check((await state(page)).tool === 'heal', 'Heal tool on the phone')
+  await page.mouse.click(...Object.values(await onPhoto(page, 0.3, 0.3)))
+  check((await state(page)).recipe.retouch.length === 1, 'tap heals a spot')
+  await shot(page, 'phone-heal')
+  await setTheme(page, 'light')
+  await tap('Masks')
+  await shot(page, 'phone-masks-light')
+  await setTheme(page, 'dark')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
 try {
   if (PHASES.includes('desktop')) await desktop()
   if (PHASES.includes('phone')) await phone()
   if (PHASES.includes('states')) await states()
   if (PHASES.includes('raw')) await raw()
+  if (PHASES.includes('masks')) await masks()
+  if (PHASES.includes('masksPhone')) await masksPhone()
 } catch (e) {
   failures.push(String(e))
   console.log('ERROR', e)

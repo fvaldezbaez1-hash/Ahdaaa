@@ -5,6 +5,7 @@ import { loadSettings, updateSettings } from '../state/settings'
 import { isTyping } from '../ui/hooks'
 import { toast } from '../ui/toast'
 import { cancelCrop, enterCrop, finishCrop, isCropping, rotateQuick } from './crop/cropTool'
+import { deleteMask, deleteSpot, enterHeal, enterMasks, exitTool, nudgeSize } from './masks/modes'
 import { neighbor, openPhoto, type StripItem } from './photos'
 import type { Session } from './session'
 import { stageControl } from './stage/stageView'
@@ -17,8 +18,14 @@ export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: '\\', action: 'Show the original (toggle)' },
   { keys: 'Y', action: 'Split before | after' },
   { keys: 'C', action: 'Crop & straighten' },
-  { keys: '[ / ]', action: 'Rotate left / right 90°' },
-  { keys: 'Enter / Esc', action: 'Apply / cancel the crop' },
+  { keys: '[ / ]', action: 'Rotate left / right 90° (brush or spot size while masking or healing)' },
+  { keys: 'Enter / Esc', action: 'Apply / cancel the crop; leave masking or healing' },
+  { keys: 'M', action: 'Masks' },
+  { keys: 'O', action: 'Show the mask overlay' },
+  { keys: 'Q', action: 'Heal & clone' },
+  { keys: 'Alt + paint', action: 'Erase from a brush mask' },
+  { keys: 'Space + drag', action: 'Move the photo while masking or healing' },
+  { keys: 'Backspace', action: 'Delete the selected heal spot or mask' },
   { keys: 'W', action: 'White balance picker' },
   { keys: 'J', action: 'Show clipping' },
   { keys: 'Z', action: 'Zoom Fit ↔ 100%' },
@@ -70,13 +77,23 @@ export function useEditorShortcuts(session: Session | null, order: StripItem[] |
       }
       if (e.altKey || ownsKey(e.target, key)) return
 
+      const tool = v.tool === 'mask' || v.tool === 'heal'
       if (key === 'Escape') {
         if (v.eyedropper) return run(() => view.set({ eyedropper: false }))
         if (v.leveling) return run(() => view.set({ leveling: false }))
         if (cropping) return run(cancelCrop)
+        if (v.rangePick || v.placing) return run(() => view.set({ rangePick: false, placing: null }))
+        if (tool) return run(exitTool)
         return
       }
       if (cropping && key === 'Enter') return run(finishCrop)
+      if (tool && key === 'Enter') return run(exitTool)
+      if (tool && (key === '[' || key === ']')) return run(() => nudgeSize(key === ']' ? 1 : -1))
+      if (tool && (key === 'Backspace' || key === 'Delete')) {
+        if (v.tool === 'heal' && v.spot) return run(() => deleteSpot(v.spot))
+        if (v.tool === 'mask' && v.layer && v.mask) return run(() => deleteMask(v.layer!, v.mask!))
+        return
+      }
       if (e.repeat) return
       switch (key) {
         case '\\':
@@ -95,6 +112,15 @@ export function useEditorShortcuts(session: Session | null, order: StripItem[] |
         case 'W':
           if (!cropping) run(() => view.set({ eyedropper: !v.eyedropper }))
           return
+        case 'm':
+        case 'M':
+          return run(() => (v.tool === 'mask' ? exitTool() : enterMasks()))
+        case 'q':
+        case 'Q':
+          return run(() => (v.tool === 'heal' ? exitTool() : enterHeal()))
+        case 'o':
+        case 'O':
+          return run(() => view.set({ overlay: !v.overlay }))
         case 'j':
         case 'J':
           return run(() => view.set({ clipping: !v.clipping }))

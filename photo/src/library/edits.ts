@@ -5,9 +5,9 @@ import type { PhotoRecord } from '../io/types'
 
 export type RecipePart = Exclude<keyof EditRecipe, 'v' | 'look'>
 
-export const ALL_PARTS: readonly RecipePart[] = ['profile', 'treatment', 'wb', 'basic', 'curve', 'mixer', 'grading', 'detail', 'effects', 'geometry', 'layers']
-/** What Copy/Paste carries by default: everything except the crop and rotation, which belong to each frame. */
-export const DEFAULT_PARTS: readonly RecipePart[] = ALL_PARTS.filter((p) => p !== 'geometry')
+export const ALL_PARTS: readonly RecipePart[] = ['profile', 'treatment', 'wb', 'basic', 'curve', 'mixer', 'grading', 'detail', 'effects', 'geometry', 'layers', 'retouch']
+/** What Copy/Paste carries by default: everything except the crop and rotation and the healing spots, which belong to each frame. */
+export const DEFAULT_PARTS: readonly RecipePart[] = ALL_PARTS.filter((p) => p !== 'geometry' && p !== 'retouch')
 
 export interface Clipboard {
   recipe: unknown
@@ -47,7 +47,7 @@ export function pasteOnto(target: Target, clip: Clipboard): EditRecipe {
     write[part as RecipePart] = structuredClone(src[part as RecipePart])
   }
   // The look describes the tone settings, so it travels with them (not with a crop-only paste).
-  if (clip.parts.some((p) => p !== 'geometry' && (ALL_PARTS as readonly string[]).includes(p))) next.look = src.look ? { ...src.look } : undefined
+  if (clip.parts.some((p) => p !== 'geometry' && p !== 'retouch' && (ALL_PARTS as readonly string[]).includes(p))) next.look = src.look ? { ...src.look } : undefined
   return next
 }
 

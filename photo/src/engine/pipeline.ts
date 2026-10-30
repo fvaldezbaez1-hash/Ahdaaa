@@ -10,7 +10,9 @@ import { REC2020_TO_P3, REC2020_TO_SRGB } from '../color/matrices'
 import { applyAffine, type Affine, type Size } from './geometry'
 import type { Gpu, Program, Target, Texture } from './gl'
 import { GUIDE_LONG_EDGE } from './image'
-import type { FrameParams, InputTransform } from './params'
+import { WB_TEMP, WB_TINT, type FrameParams, type InputTransform } from './params'
+import { layerMasks, localParams } from './local'
+import { activeLayers, drawableMasks, layerUsage } from './masks'
 import { BLUR, BOX, CHROMA_BLUR, CONVERT, DENOISE, DEVELOP, FINISH, GF_COEF, GUIDE_IN, HALF, MIN_FILTER, RESAMPLE, TONE } from './shaders'
 
 export interface Rect {
@@ -32,6 +34,7 @@ export interface ScaledSource {
 }
 
 let nextId = 1
+export const newSourceId = () => nextId++
 
 function setDevelop(p: Program, t: InputTransform) {
   p.f('u_wbMul', ...t.wbMul).m3('u_pre', t.pre).b('u_raw', t.raw)
@@ -234,9 +237,45 @@ export class StageCache {
     return stage
   }
 
+  private multis = new Map<string, { key: string; targets: Target[]; fbo: WebGLFramebuffer; version: number }>()
+
+  /** Like run, for a pass writing `count` RGBA16F targets at once. */
+  runMulti(name: string, key: string, w: number, h: number, count: number, draw: (fbo: WebGLFramebuffer) => void) {
+    const s = this.multis.get(name)
+    const fits = s && s.targets[0].width === w && s.targets[0].height === h
+    if (s && fits && s.key === key) return s
+    let targets: Target[], fbo: WebGLFramebuffer
+    if (s && fits) ({ targets, fbo } = s)
+    else {
+      if (s) this.dropMulti(s)
+      targets = Array.from({ length: count }, () => this.gpu.target(w, h, 'rgba16f'))
+      fbo = this.gpu.multi(targets)
+    }
+    draw(fbo)
+    const stage = { key, targets, fbo, version: ++this.version }
+    this.multis.set(name, stage)
+    return stage
+  }
+
+  private dropMulti(s: { targets: Target[]; fbo: WebGLFramebuffer }) {
+    s.targets.forEach((t) => this.gpu.free(t))
+    this.gpu.gl.deleteFramebuffer(s.fbo)
+  }
+
+  /** Free stages named `prefix…` that aren't in `keep` (e.g. masks of deleted layers). */
+  prune(prefix: string, keep: Set<string>) {
+    for (const [name, s] of this.stages)
+      if (name.startsWith(prefix) && !keep.has(name)) {
+        this.gpu.free(s.target)
+        this.stages.delete(name)
+      }
+  }
+
   dispose() {
     this.stages.forEach((s) => this.gpu.free(s.target))
     this.stages.clear()
+    this.multis.forEach((s) => this.dropMulti(s))
+    this.multis.clear()
   }
 }
 
@@ -251,6 +290,13 @@ function pixelExact(m: Affine): boolean {
 export interface FinishOptions {
   dither: boolean
   clipping: boolean
+  /** Id of the layer whose mask is tinted red. */
+  overlay?: string
+}
+
+/** Dehaze needs the transmission estimate: globally or in any layer. */
+export function needsHaze(p: FrameParams): boolean {
+  return p.dehaze !== 0 || layerUsage(activeLayers(p.layers))[8]
 }
 
 /** Render `frame` with `params` into `out` (size = frame.inner, display-encoded). */
@@ -300,7 +346,9 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
     })
   }
 
-  const fineOn = params.texture !== 0 || params.clarity !== 0
+  const layers = activeLayers(params.layers)
+  const use = layerUsage(layers)
+  const fineOn = params.texture !== 0 || params.clarity !== 0 || use[6] || use[7]
   let fine: Stage | null = null
   if (fineOn) {
     fine = cache.run('fine', JSON.stringify([scene.version, ds.fine]), W, H, 'r16f', false, (t) => {
@@ -314,36 +362,59 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
   }
 
   luts.update(params)
-  const local = params.highlights !== 0 || params.shadows !== 0 || fineOn
+  const local = params.highlights !== 0 || params.shadows !== 0 || fineOn || use[2] || use[3]
   const hueOn = !!params.hueLut
   const colorOn = hueOn || params.bw || params.saturation !== 0 || params.vibrance !== 0 || !!params.grading || params.fade > 0
   const toOutput = frame.output === 'display-p3' ? REC2020_TO_P3 : REC2020_TO_SRGB
-  const toneKey = JSON.stringify([
+  const outLuma = frame.output === 'display-p3' ? [0.2289746, 0.6917385, 0.0792869] : [0.2126391, 0.7151687, 0.0721923]
+  const globalKey = JSON.stringify([
     scene.version, fine?.version, frame.guide.key, frame.output, params.exposure, params.highlights, params.shadows, params.clarity, params.texture,
-    params.dehaze, params.keys, params.saturation, params.vibrance, params.bw, params.grading && Array.from(params.grading.wheels),
-    params.grading?.balance, params.grading?.k, params.fade, frame.air,
+    params.dehaze, params.keys, params.contrast, params.whites, params.blacks, params.saturation, params.vibrance, params.bw,
+    params.grading && Array.from(params.grading.wheels), params.grading?.balance, params.grading?.k, params.fade, frame.air, local,
   ])
-  const tone = cache.run('tone', toneKey, W, H, 'rgba16f', false, (t) => {
+  const drawTone = (t: Target, lp: Target[] | null) => {
     const p = gpu.program('tone', TONE)
     const m = frame.toSource
+    const none = gpu.dummy()
     p.tex('u_scene', scene.target, 0).tex('u_fine', fine?.target ?? scene.target, 1).tex('u_coef', frame.guide.coef, 2)
       .tex('u_haze', frame.guide.haze ?? frame.guide.coef, 3).tex('u_toneLut', luts.tone!, 4).tex('u_hueLut', luts.hue ?? luts.tone!, 5)
       .tex('u_curveLut', luts.curve ?? luts.tone!, 6)
+      .tex('u_lp0', lp?.[0] ?? none, 7).tex('u_lp1', lp?.[1] ?? none, 8).tex('u_lp2', lp?.[2] ?? none, 9).tex('u_lp3', lp?.[3] ?? none, 10).b('u_layersOn', !!lp)
     p.m3('u_toWorking', inp.toWorking).f('u_luma', ...inp.luma).m3('u_toSource', [m[0], m[1], m[2], m[3], m[4], m[5], 0, 0, 1])
       .f('u_regionOrigin', region.x, region.y).f('u_fullSize', frame.fullSize.width, frame.fullSize.height)
       .f('u_exposure', params.exposure).b('u_local', local).b('u_fineOn', fineOn)
       .f('u_highlights', params.highlights).f('u_shadows', params.shadows).f('u_clarity', params.clarity).f('u_texture', params.texture)
-      .f('u_dehaze', frame.guide.haze ? params.dehaze : 0).f('u_air', ...frame.air)
-      .b('u_toneOn', !params.toneIdentity).b('u_colorOn', colorOn).b('u_hueOn', hueOn).b('u_bw', params.bw)
+      .f('u_dehaze', params.dehaze).b('u_hazeOn', !!frame.guide.haze).f('u_air', ...frame.air)
+      .b('u_raw', params.kind === 'raw').f('u_curve3', params.contrast, params.whites, params.blacks).f('u_contrastExp', params.contrastExp)
+      .b('u_colorOn', colorOn).b('u_hueOn', hueOn).b('u_bw', params.bw)
       .f('u_sat', params.saturation).f('u_vib', params.vibrance).b('u_gradeOn', !!params.grading)
       .v4a('u_grade', params.grading?.wheels ?? new Float32Array(16)).f('u_gradeShape', params.grading?.balance ?? 1, params.grading?.k ?? 2)
       .f('u_fade', params.fade).b('u_curveOn', !!params.curveLut).m3('u_toOutput', toOutput)
+      .f('u_wbTemp', ...WB_TEMP).f('u_wbTint', ...WB_TINT)
     gpu.draw(t)
-  })
+  }
 
-  const outLuma = frame.output === 'display-p3' ? [0.2289746, 0.6917385, 0.0792869] : [0.2126391, 0.7151687, 0.0721923]
+  // Local layers: masks need the photo as developed without them only for range masks.
+  const overlayLayer = opts.overlay ? params.layers.find((l) => l.id === opts.overlay && drawableMasks(l.masks).length > 0) : undefined
+  const maskLayers = overlayLayer && !layers.includes(overlayLayer) ? [...layers, overlayLayer] : layers
+  let tone: Stage
+  let lp: Target[] | null = null
+  let masks = new Map<string, { target: Target; version: number }>()
+  if (!maskLayers.length) tone = cache.run('tone', globalKey, W, H, 'rgba16f', false, (t) => drawTone(t, null))
+  else {
+    const needBase = maskLayers.some((l) => drawableMasks(l.masks).some((m) => m.type === 'range'))
+    const base = needBase ? cache.run('toneBase', globalKey, W, H, 'rgba16f', false, (t) => drawTone(t, null)) : null
+    masks = layerMasks(gpu, cache, { region, toSource: frame.toSource, fullSize: frame.fullSize, outLuma }, maskLayers, base)
+    if (layers.length) {
+      const local = localParams(gpu, cache, layers, masks, W, H)
+      lp = local.targets
+      tone = cache.run('tone', JSON.stringify([globalKey, local.version]), W, H, 'rgba16f', false, (t) => drawTone(t, lp))
+    } else tone = cache.run('tone', globalKey, W, H, 'rgba16f', false, (t) => drawTone(t, null))
+  }
+
   let sharp: Stage | null = null
-  if (ds.sharpen) {
+  const sharpOn = ds.sharpen || use[10] || use[11]
+  if (sharpOn) {
     sharp = cache.run('sharp', JSON.stringify([tone.version, ds.sharpSigma]), W, H, 'r16f', false, (t) => {
       const h = gpu.target(W, H, 'r16f')
       gpu.program('blur', BLUR).tex('u_src', tone.target, 0).i('u_dir', 1, 0).f('u_sigma', ds.sharpSigma).i('u_radius', ds.sharpRadius).i('u_mode', 2).f('u_luma', ...outLuma)
@@ -357,11 +428,13 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
   const e = params.effects
   const cellPx = 1 + (e.grainSize / 100) * 4
   const cellProc = cellPx * frame.pixelScale
+  const overlay = overlayLayer ? masks.get(overlayLayer.id)?.target : undefined
   const p = gpu.program('finish', FINISH)
   p.tex('u_img', tone.target, 0).tex('u_sharp', sharp?.target ?? tone.target, 1)
+    .tex('u_lp2', lp?.[2] ?? gpu.dummy(), 2).b('u_layersOn', !!lp).tex('u_overlay', overlay ?? gpu.dummy(), 3).b('u_overlayOn', !!overlay)
     .i('u_offset', frame.inner.x - region.x, frame.inner.y - region.y).f('u_tileOrigin', frame.inner.x, frame.inner.y)
     .f('u_outSize', frame.outSize.width, frame.outSize.height).f('u_outLuma', ...outLuma).f('u_knee', params.kind === 'raw' ? 0.9 : 1)
-    .b('u_sharpOn', ds.sharpen).f('u_sharpAmount', ds.sharpAmount).f('u_sharpHalo', ds.sharpHalo).f('u_mask', ds.mask[0], ds.mask[1])
+    .b('u_sharpOn', sharpOn).f('u_sharpAmount', ds.sharpAmount).f('u_sharpHalo', ds.sharpHalo).f('u_mask', ds.mask[0], ds.mask[1])
     .f('u_vig', Math.max(-1, Math.min(1, e.vignette / 100)))
     .f('u_vigShape', 0.15 + (e.vignetteMidpoint / 100) * 0.9, 0.1 + (e.vignetteFeather / 100), e.vignetteRoundness / 100, frame.outSize.width / frame.outSize.height)
     // Grain finer than a processing pixel averages out: scale its strength like the export's downscale would.

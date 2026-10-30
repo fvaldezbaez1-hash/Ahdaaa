@@ -14,7 +14,10 @@ const ZOOM_SETTLE_MS = 160
 const HISTOGRAM_MS = 120
 
 /** View fields that change what the canvas shows. */
-const renderKey = (v: ViewState) => `${v.mode}|${v.split}|${v.holding}|${v.clipping}|${v.tool}|${v.zoom}`
+const renderKey = (v: ViewState) => `${v.mode}|${v.split}|${v.holding}|${v.clipping}|${v.tool}|${v.zoom}|${maskOverlay(v)}`
+
+/** The local layer whose mask is tinted red, while masking with the overlay on. */
+const maskOverlay = (v: ViewState) => (v.tool === 'mask' && v.overlay && v.layer) || undefined
 
 let active: StageView | null = null
 
@@ -24,6 +27,8 @@ export const stageControl = {
     active = s
   },
   toggleZoom: () => active?.toggleZoom(),
+  /** The photo box and the stage (CSS px), to place new masks in the visible part of the photo. */
+  layout: () => (active ? { box: active.box, stage: active.stageSize() } : null),
   zoomBy: (factor: number) => active?.zoomTo(view.get().zoom * factor),
   fit: () => active?.zoomTo(1),
 }
@@ -84,6 +89,10 @@ export class StageView {
     this.stageH = height
     this.pad = pad
     this.request()
+  }
+
+  stageSize() {
+    return { w: this.stageW, h: this.stageH }
   }
 
   request() {
@@ -187,7 +196,7 @@ export class StageView {
       } else this.engine.resize(tw, th)
     }
 
-    this.engine.render(r, { view: v.holding ? 'before' : v.mode, split: v.split, showClipping: v.clipping, uncropped: cropping })
+    this.engine.render(r, { view: v.holding ? 'before' : v.mode, split: v.split, showClipping: v.clipping, uncropped: cropping, maskOverlay: maskOverlay(v) })
     if (!v.holding && v.mode === 'after' && !cropping) this.scheduleHistogram()
   }
 
@@ -224,7 +233,7 @@ export class StageView {
     cs.width = `${fw * k}px`
     cs.height = `${fh * k}px`
     this.region = true
-    e.renderRegion(r, fx, fy, { view: v.holding ? 'before' : v.mode, showClipping: v.clipping })
+    e.renderRegion(r, fx, fy, { view: v.holding ? 'before' : v.mode, showClipping: v.clipping, maskOverlay: maskOverlay(v) })
     return true
   }
 

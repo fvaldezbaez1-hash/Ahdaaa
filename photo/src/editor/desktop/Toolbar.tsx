@@ -5,6 +5,8 @@ import { Segmented } from '../../ui/controls'
 import { Icon } from '../../ui/Icon'
 import { toast } from '../../ui/toast'
 import { enterCrop, finishCrop, rotateQuick } from '../crop/cropTool'
+import { ToolIcon } from '../masks/icons'
+import { enterHeal, enterMasks, exitTool } from '../masks/modes'
 import { applyAuto } from '../panels/actions'
 import type { StripItem } from '../photos'
 import { useSession } from '../session'
@@ -41,7 +43,8 @@ export function Toolbar({ order }: { order: StripItem[] | undefined }) {
   const canUndo = useEditor((s) => s.canUndo)
   const canRedo = useEditor((s) => s.canRedo)
   const mode = useView((s) => s.mode)
-  const cropping = useView((s) => s.tool === 'crop')
+  const tool = useView((s) => s.tool)
+  const cropping = tool === 'crop'
   const ai = useView((s) => s.ai)
   const [leftPanel, toggleLeft] = useLeftPanel()
   const index = order?.findIndex((p) => p.id === id) ?? -1
@@ -91,7 +94,27 @@ export function Toolbar({ order }: { order: StripItem[] | undefined }) {
         >
           <Icon name="crop" />
         </button>
-        <button type="button" className="icon-btn" disabled={cropping} onClick={() => rotateQuick(-1)} aria-label="Rotate left 90°" title="Rotate left 90° ([)">
+        <button
+          type="button"
+          className={tool === 'mask' ? 'icon-btn on' : 'icon-btn'}
+          aria-pressed={tool === 'mask'}
+          onClick={() => (tool === 'mask' ? exitTool() : enterMasks())}
+          aria-label="Masks"
+          title="Masks: adjust part of the photo (M)"
+        >
+          <Icon name="mask" />
+        </button>
+        <button
+          type="button"
+          className={tool === 'heal' ? 'icon-btn on' : 'icon-btn'}
+          aria-pressed={tool === 'heal'}
+          onClick={() => (tool === 'heal' ? exitTool() : enterHeal())}
+          aria-label="Heal and clone"
+          title="Heal & clone (Q)"
+        >
+          <ToolIcon name="heal" />
+        </button>
+        <button type="button" className="icon-btn ed-tb-rotate" disabled={cropping} onClick={() => rotateQuick(-1)} aria-label="Rotate left 90°" title="Rotate left 90° ([)">
           <Icon name="rotate" />
         </button>
         <button type="button" className="btn outline sm" disabled={cropping} onClick={() => applyAuto(engine) || toast('This photo already looks balanced')} title="Auto tone">
