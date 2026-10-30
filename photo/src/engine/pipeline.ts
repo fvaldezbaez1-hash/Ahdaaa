@@ -215,10 +215,17 @@ interface Stage {
   version: number
 }
 
+/**
+ * Pixels of results kept per stage: a big view keeps its last result, small previews cycling
+ * through many looks keep one per look (up to 32).
+ */
+const STAGE_BUDGET = 4_000_000
+
 /** Cached stage outputs for one view (after / before) or one export. */
 export class StageCache {
   private gpu: Gpu
-  private stages = new Map<string, Stage>()
+  // Most recently used first. Big regions keep one result per stage, small ones a few.
+  private stages = new Map<string, Stage[]>()
   private version = 0
 
   constructor(gpu: Gpu) {
@@ -226,14 +233,20 @@ export class StageCache {
   }
 
   run(name: string, key: string, w: number, h: number, format: 'rgba16f' | 'r16f', linear: boolean, draw: (t: Target) => void): Stage {
-    const s = this.stages.get(name)
-    const fits = s && s.target.width === w && s.target.height === h
-    if (s && fits && s.key === key) return s
-    const target = fits ? s.target : this.gpu.target(w, h, format, linear)
-    if (s && !fits) this.gpu.free(s.target)
+    const list = this.stages.get(name) ?? []
+    const i = list.findIndex((s) => s.key === key && s.target.width === w && s.target.height === h)
+    if (i >= 0) {
+      const hit = list.splice(i, 1)[0]
+      list.unshift(hit)
+      return hit
+    }
+    const keep = Math.max(1, Math.min(32, Math.floor(STAGE_BUDGET / (w * h))))
+    while (list.length >= keep) this.gpu.free(list.pop()!.target)
+    const target = this.gpu.target(w, h, format, linear)
     draw(target)
     const stage = { key, target, version: ++this.version }
-    this.stages.set(name, stage)
+    list.unshift(stage)
+    this.stages.set(name, list)
     return stage
   }
 
@@ -264,15 +277,15 @@ export class StageCache {
 
   /** Free stages named `prefix…` that aren't in `keep` (e.g. masks of deleted layers). */
   prune(prefix: string, keep: Set<string>) {
-    for (const [name, s] of this.stages)
+    for (const [name, list] of this.stages)
       if (name.startsWith(prefix) && !keep.has(name)) {
-        this.gpu.free(s.target)
+        list.forEach((s) => this.gpu.free(s.target))
         this.stages.delete(name)
       }
   }
 
   dispose() {
-    this.stages.forEach((s) => this.gpu.free(s.target))
+    this.stages.forEach((list) => list.forEach((s) => this.gpu.free(s.target)))
     this.stages.clear()
     this.multis.forEach((s) => this.dropMulti(s))
     this.multis.clear()
@@ -299,8 +312,14 @@ export function needsHaze(p: FrameParams): boolean {
   return p.dehaze !== 0 || layerUsage(activeLayers(p.layers))[8]
 }
 
-/** Render `frame` with `params` into `out` (size = frame.inner, display-encoded). */
-export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Frame, params: FrameParams, out: Target, opts: FinishOptions) {
+/** Mean display-encoded color around an output pixel (x, y) of the photo as developed before local layers. */
+export type DevelopedSampler = (x: number, y: number, radius: number) => Vec3 | null
+
+/**
+ * Render `frame` with `params` into `out` (size = frame.inner, display-encoded). Returns a
+ * sampler of the developed (pre-layer) image, valid until the next render with this cache.
+ */
+export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Frame, params: FrameParams, out: Target, opts: FinishOptions): DevelopedSampler {
   const { region, src } = frame
   const W = region.w, H = region.h
   const ds = detailSettings(params, frame.pixelScale, frame.frameLong)
@@ -442,4 +461,19 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
     .f('u_grainShape', cellPx, e.grainRoughness / 100, 1 / frame.pixelScale)
     .b('u_clip', opts.clipping).b('u_dither', opts.dither)
   gpu.draw(out)
+
+  return (x, y, radius) => {
+    luts.update(params)
+    const t = layers.length ? cache.run('toneBase', globalKey, W, H, 'rgba16f', false, (t) => drawTone(t, null)).target : tone.target
+    const r = Math.max(0, Math.round(radius))
+    const x0 = Math.max(0, Math.floor(x - region.x) - r), y0 = Math.max(0, Math.floor(y - region.y) - r)
+    const x1 = Math.min(W, Math.floor(x - region.x) + r + 1), y1 = Math.min(H, Math.floor(y - region.y) + r + 1)
+    if (x1 <= x0 || y1 <= y0) return null
+    const px = gpu.read(t, x0, y0, x1 - x0, y1 - y0)
+    const sum: Vec3 = [0, 0, 0]
+    for (let i = 0; i < px.length; i += 4) for (let k = 0; k < 3; k++) sum[k] += px[i + k]
+    const n = px.length / 4
+    const enc = (v: number) => (v <= 0.0031308 ? 12.92 * Math.max(0, v) : 1.055 * Math.min(1, v) ** (1 / 2.4) - 0.055)
+    return [enc(sum[0] / n), enc(sum[1] / n), enc(sum[2] / n)]
+  }
 }

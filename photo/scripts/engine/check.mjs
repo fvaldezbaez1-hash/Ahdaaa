@@ -35,7 +35,7 @@ const ok = (cond, label, detail) => console.log(`${cond ? 'PASS' : 'FAIL'} ${lab
 console.log('supported', await page.evaluate(() => window.lab.supported))
 const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-05.jpg', 'photo-21.jpg']
 for (const j of jpegList) await lab('loadJpeg', j, '/jpeg/' + j)
-const needRaw = want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
+const needRaw = want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
 if (needRaw) {
   console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW')))
   console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF')))
@@ -117,6 +117,8 @@ if (want('local')) {
   ok(b.maxDiff <= 2 && b.meanDiff < 0.6, 'masks + spots: 100 % view == export', b)
   const c = await lab('tiling', 'arw', LOCAL)
   ok(c.maxDiff16 <= 320 && c.meanDiff16 < 0.5, 'masks + spots: tiled export == single tile (16-bit)', c)
+  const d = await lab('developedSample', 'arw', { layers: LAYERS }, 0.3, 0.6)
+  ok(d.maxDiff < 4 / 255, 'samplePixel developed = the photo without its layers (range eyedropper)', d)
   const h = await lab('healCheck', 'arw', 0.414, 0.714, 0.013)
   save('heal-duck', h.png)
   // The feature's texture is gone (spread back to water level) and the brightness matches the surroundings.
@@ -124,6 +126,8 @@ if (want('local')) {
   const t = await lab('timing', 'arw', 1600, 1000, LOCAL)
   console.log('timing with 5 layers + 2 spots (SwiftShader, 1600×1000)', JSON.stringify(t))
 }
+
+if (want('previews')) console.log('look previews (SwiftShader)', JSON.stringify(await lab('previewTiming', 'arw', 12)))
 
 if (want('context')) {
   const r = await lab('contextLoss', 'photo-21.jpg')
@@ -143,7 +147,7 @@ if (want('renders') || want('look')) {
     save(file, r.png)
     console.log('render', file, JSON.stringify({ ...r, png: undefined }))
   }
-  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local'].includes(a))
+  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews'].includes(a))
   const R0 = R
   R = async (file, ...rest) => (only.length === 0 || only.some((o) => file.includes(o))) && R0(file, ...rest)
   await R('arw-default', 'arw', {})

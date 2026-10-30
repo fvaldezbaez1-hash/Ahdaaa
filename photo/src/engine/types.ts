@@ -49,6 +49,15 @@ export interface RenderOptions {
   maskOverlay?: string
 }
 
+export interface SampleOptions {
+  /**
+   * Phase 2: sample the photo as developed with the global settings, before local layers —
+   * what range masks measure — instead of the source. Returns display-encoded RGB (0…1, the
+   * canvas's color space); `radius` is then in canvas pixels.
+   */
+  developed?: boolean
+}
+
 export interface Histogram {
   /** 256 bins each, of the rendered (display-encoded) image. */
   r: Uint32Array
@@ -97,7 +106,7 @@ export interface Engine {
    * Average SOURCE pixel (linear, in the source's space) around a point given in
    * normalized coordinates of the last rendered frame (0…1). For the WB eyedropper.
    */
-  samplePixel(nx: number, ny: number, radius?: number): Vec3 | null
+  samplePixel(nx: number, ny: number, radius?: number, opts?: SampleOptions): Vec3 | null
   /** Suggested Auto settings for the current source (tone + white balance). */
   auto(recipe: EditRecipe): { basic: Partial<Basic>; wb?: { temp: number; tint: number } }
   /**

@@ -360,5 +360,50 @@ async function healCheck(name, x, y, r) {
   return { source: src, before: stats(a), after: stats(b), png: await toPng({ width: side * z * 2, height: side * z, data: comp }) }
 }
 
-window.lab = { contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
+/** The presets panel's live previews: one small engine renders every visible look, again after each edit. */
+async function previewTiming(name, n = 12) {
+  const { builtinPresets } = await import('/src/presets/catalog.ts')
+  const { applyPreset } = await import('/src/presets/apply.ts')
+  const p = photos[name]
+  const k = Math.max(1, Math.floor(Math.max(p.image.width, p.image.height) / 360))
+  const image = { ...boxReduce(p.image, k), fullWidth: p.image.fullWidth ?? p.image.width }
+  const c = new OffscreenCanvas(1, 1)
+  const e = createEngine(c)
+  const gl = c.getContext('webgl2')
+  e.setSource(image, p.color)
+  const looks = builtinPresets().slice(0, n)
+  const pass = (exposure) => {
+    const t = performance.now()
+    for (const look of looks) {
+      const r = applyPreset(recipeFor(name, { basic: { exposure } }), look, 100, 'original', p.color.kind)
+      const out = e.outputSize(r)
+      e.resize(out.width, out.height)
+      e.render(r)
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4))
+    }
+    return Math.round((performance.now() - t) / looks.length)
+  }
+  const cold = pass(0)
+  const edit = pass(0.1)
+  const again = pass(0.2)
+  e.dispose()
+  return { size: [image.width, image.height], looks: looks.length, msPerLook: { cold, afterEdit: edit, again } }
+}
+
+/** samplePixel(…, { developed: true }) = the photo developed without its layers, display-encoded. */
+async function developedSample(name, patch, nx, ny) {
+  const p = photos[name]
+  const recipe = recipeFor(name, patch)
+  engine.setSource(p.image, p.color)
+  const out = engine.outputSize(recipe)
+  engine.resize(out.width, out.height)
+  engine.render(recipe)
+  const s = engine.samplePixel(nx, ny, 2, { developed: true })
+  const ex = await engine.renderImage({ ...recipe, layers: [] }, p.image, p.color, { bitDepth: 16, colorSpace: 'srgb' })
+  const x = Math.floor(nx * ex.width), y = Math.floor(ny * ex.height), m = [0, 0, 0]
+  for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) for (let k = 0; k < 3; k++) m[k] += ex.data[((y + j) * ex.width + x + i) * 4 + k] / 65535 / 25
+  return { developed: s, exportWithoutLayers: m, maxDiff: Math.max(...m.map((v, k) => Math.abs(v - s[k]))) }
+}
+
+window.lab = { developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
 window.ready = true

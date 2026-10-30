@@ -13,12 +13,15 @@ import { findHealSource, retouchWindow } from './heal'
 import { binHistogram } from './histogram'
 import { areaDownscale, atmosphericLight, averagePixel, boxReduce, lowResSize, type FloatImage } from './image'
 import { frameParams, toWorkingSpace, type FrameParams } from './params'
-import { computeGuide, Luts, marginFor, needsHaze, renderFrame, scaleSource, StageCache, type Frame, type Guide, type ScaledSource } from './pipeline'
+import { computeGuide, Luts, marginFor, needsHaze, renderFrame, scaleSource, StageCache, type DevelopedSampler, type Frame, type Guide, type ScaledSource } from './pipeline'
 import { applySpots } from './retouch'
 import { DOWNSAMPLE, PRESENT } from './shaders'
-import type { Engine, ExportRenderOptions, Histogram, RenderedImage, RenderOptions, SourceColor, SourceImage } from './types'
+import type { Engine, ExportRenderOptions, Histogram, RenderedImage, RenderOptions, SampleOptions, SourceColor, SourceImage } from './types'
 
 export type { Engine } from './types'
+
+/** Guides kept per engine (each ≤ 512 px, a few MB). */
+const GUIDE_CACHE = 16
 
 export function createEngine(canvas: HTMLCanvasElement | OffscreenCanvas): Engine {
   return new WebGLEngine(canvas)
@@ -42,6 +45,9 @@ interface LastRender {
   version: number
   /** Normalized position in the drawn frame → source image and pixel, for the eyedropper. */
   pick: (nx: number, ny: number) => { img: SourceImage; x: number; y: number }
+  /** The 'after' frame's developed (pre-layer) image, and where the frame sits in output px. */
+  developed: DevelopedSampler | null
+  inner: { x: number; y: number; w: number; h: number }
 }
 
 type Views = { after: StageCache; before: StageCache }
@@ -206,9 +212,13 @@ class WebGLEngine implements Engine {
     const haze = needsHaze(p)
     const key = JSON.stringify([p.keys.input, haze])
     let g = this.guides.get(key)
-    if (g) return g
-    // Keep the after and before guides; drop older ones.
-    while (this.guides.size >= 2) {
+    if (g) {
+      this.guides.delete(key)
+      this.guides.set(key, g)
+      return g
+    }
+    // A few per white balance (after, before, the looks a preview engine cycles through); drop the oldest.
+    while (this.guides.size >= GUIDE_CACHE) {
       const [k0, old] = this.guides.entries().next().value!
       gpu.free(old.coef)
       gpu.free(old.haze)
@@ -230,11 +240,6 @@ class WebGLEngine implements Engine {
   }
 
   render(recipe: EditRecipe, opts: RenderOptions = {}): void {
-    const t0 = performance.now() // PROBE
-    try { this.render0(recipe, opts) } finally { this.gpu?.gl.readPixels(0, 0, 1, 1, this.gpu.gl.RGBA, this.gpu.gl.UNSIGNED_BYTE, new Uint8Array(4)); const g = globalThis as unknown as { __lumenProbe?: { n: number; ms: number[]; size: number[]; opts: string[] } }; g.__lumenProbe ??= { n: 0, ms: [], size: [], opts: [] }; g.__lumenProbe.n++; g.__lumenProbe.ms.push(Math.round(performance.now() - t0)); g.__lumenProbe.size = [this.canvas.width, this.canvas.height]; g.__lumenProbe.opts.push(JSON.stringify(opts)) } // PROBE
-  }
-
-  private render0(recipe: EditRecipe, opts: RenderOptions = {}): void {
     const src = this.src
     if (!this.ready() || !src) return
     const uncropped = !!opts.uncropped
@@ -320,7 +325,7 @@ class WebGLEngine implements Engine {
     const gpu = this.gpu!, src = this.src!
     const view = opts.view ?? 'after'
     const { w, h } = base.inner
-    const one = (which: 'after' | 'before', r: EditRecipe) => {
+    const one = (which: 'after' | 'before', r: EditRecipe, keep?: (d: DevelopedSampler) => void) => {
       const params = frameParams(r, src.color)
       let t = this.display[which]
       if (!t || t.width !== w || t.height !== h) {
@@ -329,16 +334,17 @@ class WebGLEngine implements Engine {
         this.display[which] = t
       }
       const frame: Frame = { ...base, src: which === 'after' ? base.src : plain, output: this.output, guide: this.guideFor(params), air: toWorkingSpace(params.input, src.air) }
-      renderFrame(gpu, views[which], this.luts!, frame, params, t, { dither: false, clipping: !!opts.showClipping, overlay: which === 'after' ? opts.maskOverlay : undefined })
+      keep?.(renderFrame(gpu, views[which], this.luts!, frame, params, t, { dither: false, clipping: !!opts.showClipping, overlay: which === 'after' ? opts.maskOverlay : undefined }))
       return t
     }
-    const after = view !== 'before' ? one('after', recipe) : null
+    let developed: DevelopedSampler | null = null
+    const after = view !== 'before' ? one('after', recipe, (d) => (developed = d)) : null
     const before = view !== 'after' ? one('before', { ...src.before, geometry: recipe.geometry }) : null
     const split = view === 'before' ? 2 : view === 'split' ? Math.min(1, Math.max(0, opts.split ?? 0.5)) : -1
     gpu.program('present', PRESENT).tex('u_after', (after ?? before)!, 0).tex('u_before', (before ?? after)!, 1)
       .f('u_rect', rect[0], rect[1], rect[2], rect[3]).f('u_split', split).f('u_canvasH', this.canvas.height)
     gpu.draw(null, this.canvas.width, this.canvas.height)
-    this.last = { shown: view === 'before' ? 'before' : 'after', version: ++this.renders, pick }
+    this.last = { shown: view === 'before' ? 'before' : 'after', version: ++this.renders, pick, developed, inner: base.inner }
   }
 
   histogram(): Histogram | null {
@@ -357,9 +363,14 @@ class WebGLEngine implements Engine {
   }
 
   /** `radius` is in pixels of the image sampled (the working source, or the full source after renderRegion). */
-  samplePixel(nx: number, ny: number, radius = 3): Vec3 | null {
+  samplePixel(nx: number, ny: number, radius = 3, opts?: SampleOptions): Vec3 | null {
     const src = this.src
     if (!src) return null
+    if (opts?.developed) {
+      const l = this.last
+      if (!l?.developed || !this.ready()) return null
+      return l.developed(l.inner.x + nx * l.inner.w, l.inner.y + ny * l.inner.h, radius)
+    }
     if (!this.last) {
       const [x, y] = normalizedToSource(src.img, src.before.geometry, false, nx, ny)
       return averagePixel(src.img, x, y, radius)
