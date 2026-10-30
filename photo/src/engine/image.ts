@@ -131,3 +131,12 @@ export function atmosphericLight(img: FloatImage): Vec3 {
   const floor = 0.25
   return a.map((v) => Math.max(floor, v / Math.max(1, count))) as Vec3
 }
+
+/** Area-average resize to 16-bit (e.g. the denoised full-resolution raster to the working image's size). */
+export function resizeArea16(src: SourceImage, width: number, height: number): SourceImage {
+  if (src.width === width && src.height === height) return src
+  const f = areaDownscale(src, width, height).data
+  const data = new Uint16Array(f.length)
+  for (let i = 0; i < f.length; i++) data[i] = Math.round(Math.min(1, Math.max(0, f[i])) * 65535)
+  return { width, height, data }
+}

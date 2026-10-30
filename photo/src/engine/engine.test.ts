@@ -261,3 +261,59 @@ describe('healing', () => {
     expect(retouchWindow([spot], 1000, 1000, { x0: 500, y0: 0, x1: 600, y1: 50 })).toEqual({ x0: 500, y0: 0, x1: 600, y1: 50 })
   })
 })
+
+describe('AI masks and removal', () => {
+  it('refines a low-res AI mask along the photo: smooth where flat, sharp at an edge', async () => {
+    const { aiMaskValue } = await import('./masks')
+    // 8×8 raster: left half 0, right half 1.
+    const mask = (i: number) => (i >= 4 ? 1 : 0)
+    const flat = () => 0
+    // Flat photo: plain smooth interpolation across the step.
+    const mid = aiMaskValue(4, 4, 8, 8, mask, flat, 0)
+    expect(mid).toBeGreaterThan(0.3)
+    expect(mid).toBeLessThan(0.7)
+    // The photo has an edge at x = 4: a pixel just left of it (dark side) follows the dark samples.
+    const photo = (i: number) => (i >= 4 ? 2 : -2)
+    expect(aiMaskValue(3.9, 4, 8, 8, mask, photo, -2)).toBeLessThan(0.05)
+    expect(aiMaskValue(4.1, 4, 8, 8, mask, photo, 2)).toBeGreaterThan(0.95)
+  })
+  it('measures sensor-like noise robustly and grains the fill to match', async () => {
+    const { noiseLevel, removeBlend } = await import('./masks')
+    // Shot noise k = 0.02 on a flat 0.25 patch, plus a few strong edges that must be ignored.
+    let seed = 7
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+    const gauss = () => Math.sqrt(-2 * Math.log(rnd())) * Math.cos(2 * Math.PI * rnd())
+    const k = 0.02, v = 0.25
+    const W = 64
+    const img = Array.from({ length: W * W }, () => v + gauss() * k * Math.sqrt(v))
+    const samples: { v: number; hf: number }[] = []
+    for (let y = 1; y < W - 1; y++)
+      for (let x = 1; x < W - 1; x++) {
+        let n = 0
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (i || j) n += img[(y + j) * W + x + i]
+        const c = img[y * W + x]
+        samples.push({ v: c, hf: c - n / 8 + (x === 20 && y % 4 === 0 ? 0.3 : 0) })
+      }
+    expect(noiseLevel(samples)).toBeGreaterThan(0.85 * k)
+    expect(noiseLevel(samples)).toBeLessThan(1.2 * k)
+    expect(removeBlend(0.5, 0.2, 0, 1, k)).toBe(0.5)
+    expect(removeBlend(0.5, 0.2, 1, 0, k)).toBeCloseTo(0.2, 12)
+    expect(removeBlend(0.5, 0.2, 1, 1, k)).toBeCloseTo(0.2 + k * Math.sqrt(0.2), 12)
+    expect(removeBlend(0.5, 0.2, 0.5, 0, k)).toBeCloseTo(0.35, 12)
+  })
+  it('grows a tile window to hold a removal area and its noise ring', () => {
+    const area = { id: 'r', mode: 'remove' as const, strokes: [], rect: { x: 0.4, y: 0.4, w: 0.2, h: 0.1 }, fill: 'f', model: 'm' }
+    const w = retouchWindow([area], 1000, 1000, { x0: 0, y0: 0, x1: 450, y1: 450 })
+    expect(w.x1).toBeGreaterThan(600 + 20)
+    expect(w.y1).toBeGreaterThan(500 + 20)
+    expect(retouchWindow([area], 1000, 1000, { x0: 0, y0: 0, x1: 100, y1: 100 })).toEqual({ x0: 0, y0: 0, x1: 100, y1: 100 })
+  })
+  it('resizes a 16-bit image by area average (the denoised raster to the working size)', async () => {
+    const { resizeArea16 } = await import('./image')
+    const data = new Uint16Array(4 * 2 * 3)
+    for (let i = 0; i < 4 * 2; i++) data.set(i % 2 ? [65535, 0, 0] : [0, 0, 65535], i * 3)
+    const r = resizeArea16({ width: 4, height: 2, data }, 2, 1)
+    expect([r.width, r.height]).toEqual([2, 1])
+    expect(Array.from(r.data)).toEqual([32768, 0, 32768, 32768, 0, 32768])
+  })
+})

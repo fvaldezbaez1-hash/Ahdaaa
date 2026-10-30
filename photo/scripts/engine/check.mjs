@@ -35,7 +35,7 @@ const ok = (cond, label, detail) => console.log(`${cond ? 'PASS' : 'FAIL'} ${lab
 console.log('supported', await page.evaluate(() => window.lab.supported))
 const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-05.jpg', 'photo-21.jpg']
 for (const j of jpegList) await lab('loadJpeg', j, '/jpeg/' + j)
-const needRaw = want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
+const needRaw = want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
 if (needRaw) {
   console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW')))
   console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF')))
@@ -127,6 +127,41 @@ if (want('local')) {
   console.log('timing with 5 layers + 2 spots (SwiftShader, 1600×1000)', JSON.stringify(t))
 }
 
+// Phase 3: AI masks, removal and denoise from synthetic rasters.
+const AI_BLOB = { id: 'aiblob', name: 'AI subject', enabled: true, opacity: 1, adjust: { exposure: -1, saturation: -40 },
+  masks: [mask('a1', { type: 'ai', target: 'subject', raster: 'blob', model: 'test' })] }
+const AI_SKY = { id: 'aisky', name: 'AI sky', enabled: true, opacity: 1, adjust: { exposure: -0.8, highlights: -40, saturation: 35, temp: -20 },
+  masks: [mask('s1', { type: 'ai', target: 'sky', raster: 'sky', model: 'test' })] }
+const REMOVE = { id: 'rm1', mode: 'remove', model: 'test', fill: 'fill', rect: { x: 0.075, y: 0.27, w: 0.07, h: 0.09 },
+  strokes: [{ points: [{ x: 0.085, y: 0.29 }, { x: 0.11, y: 0.32 }, { x: 0.13, y: 0.34 }], r: 0.014, feather: 40, flow: 1 }] }
+const AI = { layers: [AI_BLOB], retouch: [REMOVE], denoise: { amount: 60, raster: 'dn', model: 'test' } }
+
+if (want('ai')) {
+  const r = await lab('setupRasters')
+  const rectPx = r.rect
+  const a = await lab('canvasParity', 'arw', AI)
+  ok(a.maxDiff <= 2, 'AI mask + removal + denoise: interactive canvas (1:1) == export', a)
+  const b = await lab('regionCheck', 'arw', AI, 900, 600)
+  ok(b.maxDiff <= 2 && b.meanDiff < 0.6, 'AI mask + removal + denoise: 100 % view == export', b)
+  const c = await lab('tiling', 'arw', AI)
+  ok(c.maxDiff16 <= 320 && c.meanDiff16 < 0.5, 'AI mask + removal (across a tile edge) + denoise: tiled == single tile (16-bit)', c)
+  const sky = await lab('canvasParity', 'photo-21.jpg', { layers: [AI_SKY] })
+  ok(sky.maxDiff <= 2, 'AI sky mask on the lighthouse: canvas == export', sky)
+  const missing = await lab('vsPlain', 'photo-21.jpg', { layers: [{ ...AI_SKY, masks: [mask('x', { type: 'ai', target: 'sky', raster: 'nope', model: 'test' })] }], retouch: [{ ...REMOVE, fill: 'nope' }], denoise: { amount: 50, raster: 'nope', model: 'test' } })
+  ok(missing.maxDiff === 0, 'missing rasters: empty AI mask, no-op removal and denoise, identical to the photo', missing)
+  const d = await lab('denoiseCheck')
+  ok(d.amount0VsPlain === 0 && d.amount100VsDenoisedSource <= 2 && d.grain[100] < d.grain[50] && d.grain[50] < d.grain[0], 'denoise blend at 0 / 50 / 100', d)
+  const rm = await lab('removalCheck', { retouch: [REMOVE] }, rectPx)
+  save('ai-remove', rm.png)
+  ok(rm.grainInside > 0.5 * rm.grainAround && rm.grainInside < 1.6 * rm.grainAround, 'removal fill carries grain like its surroundings', { ...rm, png: undefined })
+  const t = await lab('timing', 'arw', 1600, 1000)
+  console.log('timing without AI items (SwiftShader, 1600×1000)', JSON.stringify(t))
+  const R = async (file, name, patch) => save(file, (await lab('exportRender', name, patch, { maxLongEdge: 1400, png: true })).png)
+  await R('ai-blob', 'arw', { layers: [AI_BLOB] })
+  await R('ai-sky', 'photo-21.jpg', { layers: [AI_SKY] })
+  save('ai-overlay', await lab('canvasShot', 'photo-21.jpg', { layers: [AI_SKY] }, { maskOverlay: 'aisky' }, 768, 512))
+}
+
 if (want('previews')) console.log('look previews (SwiftShader)', JSON.stringify(await lab('previewTiming', 'arw', 12)))
 
 if (want('context')) {
@@ -147,7 +182,7 @@ if (want('renders') || want('look')) {
     save(file, r.png)
     console.log('render', file, JSON.stringify({ ...r, png: undefined }))
   }
-  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews'].includes(a))
+  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai'].includes(a))
   const R0 = R
   R = async (file, ...rest) => (only.length === 0 || only.some((o) => file.includes(o))) && R0(file, ...rest)
   await R('arw-default', 'arw', {})

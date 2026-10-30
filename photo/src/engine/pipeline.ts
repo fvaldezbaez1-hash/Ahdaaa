@@ -6,6 +6,7 @@
 //   low-res copy ── guide (guided-filter coefficients, dehaze transmission) ──┘
 
 import type { Vec3 } from '../color/matrices'
+import type { LocalLayer } from '../edit/types'
 import { REC2020_TO_P3, REC2020_TO_SRGB } from '../color/matrices'
 import { applyAffine, type Affine, type Size } from './geometry'
 import type { Gpu, Program, Target, Texture } from './gl'
@@ -13,6 +14,7 @@ import { GUIDE_LONG_EDGE } from './image'
 import { WB_TEMP, WB_TINT, type FrameParams, type InputTransform } from './params'
 import { layerMasks, localParams } from './local'
 import { activeLayers, drawableMasks, layerUsage } from './masks'
+import type { Rasters } from './rasters'
 import { BLUR, BOX, CHROMA_BLUR, CONVERT, DENOISE, DEVELOP, FINISH, GF_COEF, GUIDE_IN, HALF, MIN_FILTER, RESAMPLE, TONE } from './shaders'
 
 export interface Rect {
@@ -139,6 +141,8 @@ export interface Frame {
   guide: Guide
   /** Airlight in working space. */
   air: Vec3
+  /** Stored AI results (AI masks); missing ones render as empty masks. */
+  rasters?: Rasters
 }
 
 /** Pixel-size-dependent filter settings. */
@@ -168,6 +172,21 @@ export function detailSettings(p: FrameParams, ps: number, frameLong: number) {
     sharpHalo: 0.02 + (d.detail / 100) * 0.3,
     mask: d.masking > 0 ? [(d.masking / 100) * 0.04, (d.masking / 100) * 0.04 + 0.02] : [0, 0],
   }
+}
+
+/**
+ * Extra margin (px) for AI masks: their refinement looks up the photo under raster samples up to
+ * ~2.5 raster px away. `scale` = processing px per full-source px.
+ */
+export function aiMargin(layers: readonly LocalLayer[], rasters: Rasters | undefined, full: Size, scale: number): number {
+  let px = 0
+  for (const l of layers)
+    for (const m of l.enabled ? l.masks : [])
+      if (m.type === 'ai') {
+        const img = rasters?.image(m.raster)
+        if (img) px = Math.max(px, (2.5 * Math.max(full.width, full.height) * scale) / Math.max(img.width, img.height))
+      }
+  return Math.ceil(px)
 }
 
 /** Margin (px) the neighborhood passes need around a region, for the largest slider values. */
@@ -423,7 +442,7 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
   else {
     const needBase = maskLayers.some((l) => drawableMasks(l.masks).some((m) => m.type === 'range'))
     const base = needBase ? cache.run('toneBase', globalKey, W, H, 'rgba16f', false, (t) => drawTone(t, null)) : null
-    masks = layerMasks(gpu, cache, { region, toSource: frame.toSource, fullSize: frame.fullSize, outLuma }, maskLayers, base)
+    masks = layerMasks(gpu, cache, { region, toSource: frame.toSource, fullSize: frame.fullSize, outLuma, rasters: frame.rasters, scene, luma: inp.luma }, maskLayers, base)
     if (layers.length) {
       const local = localParams(gpu, cache, layers, masks, W, H)
       lp = local.targets
