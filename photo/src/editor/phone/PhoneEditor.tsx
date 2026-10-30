@@ -143,7 +143,7 @@ export function PhoneEditor() {
           {cropping ? <CropActions /> : tool.parts ? <PanelReset parts={tool.parts} title={tool.title} /> : null}
           {!cropping && tool.hint && !tool.parts && <span className="muted small">{tool.hint}</span>}
         </div>
-        <div className={tool.id === 'presets' ? 'ed-phone-panel-body flush' : 'ed-phone-panel-body scroll'}>
+        <div key={tool.id} className={tool.id === 'presets' ? 'ed-phone-panel-body flush' : 'ed-phone-panel-body scroll'}>
           {tool.parts && tool.hint && <p className="muted small ed-phone-hint">{tool.hint}</p>}
           {tool.body()}
         </div>

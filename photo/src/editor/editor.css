@@ -1481,4 +1481,7 @@ body:has(.ed-is-phone) .toast {
     height: 36px;
     font-size: 14px;
   }
+  .ed-kbd {
+    display: none;
+  }
 }
