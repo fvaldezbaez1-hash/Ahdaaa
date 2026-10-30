@@ -3,8 +3,26 @@
 // database (db.presets). How a look applies is in apply.ts.
 import type { Preset, Variation } from '../edit/types'
 import type { CollectionDef } from './data/kit'
+import { airy } from './data/airy'
+import { architecture } from './data/architecture'
+import { bw } from './data/bw'
+import { cinematic } from './data/cinematic'
+import { creative } from './data/creative'
 import { essentials } from './data/essentials'
+import { family } from './data/family'
 import { film } from './data/film'
+import { food } from './data/food'
+import { landscape } from './data/landscape'
+import { moody } from './data/moody'
+import { nature } from './data/nature'
+import { night } from './data/night'
+import { portrait } from './data/portrait'
+import { seasonal } from './data/seasonal'
+import { sports } from './data/sports'
+import { street } from './data/street'
+import { travel } from './data/travel'
+import { vintage } from './data/vintage'
+import { wedding } from './data/wedding'
 
 export { applyPreset, stripLook } from './apply'
 
@@ -23,7 +41,10 @@ export const VARIATIONS: { id: Variation; label: string; short: string }[] = [
   { id: 'stronger', label: 'Stronger', short: 'Bold' },
 ]
 
-const DEFS: CollectionDef[] = [essentials, film]
+const DEFS: CollectionDef[] = [
+  essentials, film, portrait, landscape, bw, cinematic, street, travel, food, wedding,
+  night, vintage, seasonal, moody, airy, nature, architecture, sports, family, creative,
+]
 
 const PRESETS: Preset[] = DEFS.flatMap((c) =>
   c.looks.map((l) => ({

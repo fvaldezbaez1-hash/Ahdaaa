@@ -8,7 +8,7 @@ export interface ProviderInfo {
   vendor: string
   /** Picker label. */
   label: string
-  /** Strong vision + tool-use model at a sensible price; the user can override it. */
+  /** Strong vision + tool-use model at a sensible price (the team's research picks; a bake-off will settle them). The user can override it. */
   defaultModel: string
   /** Suggestions for the model field. */
   models: string[]
@@ -39,8 +39,8 @@ export const PROVIDERS: Record<AiProvider, ProviderInfo> = {
     id: 'anthropic',
     vendor: 'Anthropic',
     label: 'Anthropic · Claude',
-    defaultModel: 'claude-opus-5-5',
-    models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+    defaultModel: 'claude-sonnet-5-5',
+    models: ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'],
     keyUrl: 'https://platform.claude.com/settings/keys',
     keyPlaceholder: 'sk-ant-…',
   },

@@ -30,8 +30,9 @@ const round = (v: number, step: number) => {
 function fit(path: string, v: number, kind: SourceKind): number {
   if (path.endsWith('.hue') && path.startsWith('grading.')) return round(((v % 360) + 360) % 360, 1)
   if (path.endsWith('.sat') && path.startsWith('grading.')) return round(Math.min(100, Math.max(0, v)), 1)
-  const spec = SPECS[path] ?? (path.startsWith('wb.') ? SPECS[`${path}.${kind}`] : undefined)
-  const s = spec ?? { min: -100, max: 100, step: 1 }
+  // White balance keeps whole Kelvin (the slider's 50 K step would round away small mired shifts).
+  const wb = path.startsWith('wb.') ? SPECS[`${path}.${kind}`] : undefined
+  const s = wb ? { ...wb, step: 1 } : (SPECS[path] ?? { min: -100, max: 100, step: 1 })
   return round(Math.min(s.max, Math.max(s.min, v)), s.step)
 }
 

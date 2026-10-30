@@ -22,7 +22,7 @@ export const essentials: CollectionDef = {
       wbShift: { temp: 3, tint: 0 },
       basic: { contrast: -4, saturation: -10 },
       curve: { rgb: tc(0.08, 0.02, 0.03) },
-      grading: { shadows: w(30, 6) },
+      grading: { shadows: w(30, 9) },
       effects: { vignette: -8 },
     }),
     look('bright', 'Bright', 'Opens up the whole frame while keeping highlights intact.', ['bright', 'light', 'airy'], {
@@ -34,7 +34,7 @@ export const essentials: CollectionDef = {
       wbShift: { temp: -4, tint: 0 },
       basic: { exposure: -0.12, contrast: 10, highlights: -30, shadows: -4, blacks: -6, saturation: -16 },
       curve: { rgb: tc(0.02, 0.02, 0.02, -0.02) },
-      grading: { shadows: w(210, 8) },
+      grading: { shadows: w(210, 12) },
       effects: { vignette: -20 },
     }),
     look('crisp', 'Crisp', 'Sharper edges, firm contrast and clean, slightly cool color.', ['sharp', 'clean', 'detail'], {
@@ -57,7 +57,7 @@ export const essentials: CollectionDef = {
       wbShift: { temp: 4, tint: 1 },
       basic: { contrast: -6, highlights: -18, shadows: 12, vibrance: 4 },
       curve: { rgb: tc(0.03, 0, 0.02) },
-      grading: { highlights: w(45, 4) },
+      grading: { highlights: w(45, 6) },
     }),
   ],
 }

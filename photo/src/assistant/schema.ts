@@ -27,14 +27,14 @@ const MAX_CURVE_POINTS = 16
 /** Presets carry white balance as a relative shift (RAW: mireds, JPEG: slider units). */
 const WB_SHIFT: Range = { min: -100, max: 100, step: 1 }
 
-/** Every number the AI may set, keyed by recipe path, in a stable order. */
+/** Every number the AI may set, keyed by recipe path, in the editor's panel order. */
 export function numericRanges(kind: SourceKind, forPreset = false): Map<string, Range> {
   const m = new Map<string, Range>()
   const spec = (k: string): Range => ({ min: SPECS[k].min, max: SPECS[k].max, step: SPECS[k].step })
   const fromSpecs = (prefix: string) => Object.keys(SPECS).filter((k) => k.startsWith(prefix)).forEach((k) => m.set(k, spec(k)))
-  fromSpecs('basic.')
   m.set('wb.temp', forPreset ? WB_SHIFT : spec(`wb.temp.${kind}`))
   m.set('wb.tint', forPreset ? WB_SHIFT : spec(`wb.tint.${kind}`))
+  fromSpecs('basic.')
   for (const g of MIXER_GROUPS) for (const b of BANDS) m.set(`mixer.${g}.${b}`, { min: -100, max: 100, step: 1 })
   for (const w of WHEELS) {
     m.set(`grading.${w}.hue`, { min: 0, max: 360, step: 1, wrap: true })
