@@ -46,6 +46,19 @@ Once it's installed, Lumen works offline.
   histogram, unlimited undo and true 100 % zoom from the full-resolution file.
 - Keyboard shortcuts on desktop (listed in Settings).
 
+**Local edits**
+- **Masks (M):** brush, linear gradient, radial gradient, and brightness or
+  color range. Combine them with add, subtract or intersect, and invert them.
+- Each mask layer has its own sliders: exposure, contrast, highlights,
+  shadows, whites, blacks, warmth, tint, texture, clarity, dehaze, saturation,
+  sharpness (negative softens skin), noise reduction and a color tint.
+- A red overlay (O) shows exactly where a mask applies.
+- **Heal and clone (Q):** click a spot and Lumen picks a matching area to copy
+  from. Drag either circle to adjust it. Healing blends the brightness and
+  color in so no patch shows.
+- Masks stay on the same part of the photo when you change the crop, and look
+  the same on screen, at 100 % and in the export.
+
 **Presets**
 - 100 hand-made looks in 20 collections, such as Film, Portrait, Landscape,
   Black & White, Cinematic, Moody and Wedding.
@@ -60,8 +73,9 @@ Once it's installed, Lumen works offline.
 - Resize on export. It renders in tiles, so full-size exports work even on phones.
 - Save to Files or Downloads, or share straight to other apps.
 
-**Coming next:** a built-in AI editing assistant. You pick OpenAI, Google or
-Anthropic and use your own API key. The settings for it are already in place.
+**Coming next:** AI masks that select the subject, sky or people for you, AI
+noise reduction and object removal, all running on your device. A built-in AI
+editing assistant (your own OpenAI, Google or Anthropic key) is partly built.
 
 ## Good to know
 
@@ -105,7 +119,7 @@ Code map:
 | `src/engine/` | WebGL2 render engine: pipeline stages, shaders, tiled export, histogram, auto settings |
 | `src/io/` | Decoding (LibRaw, images, TIFF), import, IndexedDB storage, thumbnails, export encoders (JPEG/PNG/TIFF, EXIF, ICC) |
 | `src/library/` | Library grid, albums, import and export sheets |
-| `src/editor/` | Editor screen: panels, stage, crop tool, desktop and phone layouts, shortcuts |
+| `src/editor/` | Editor screen: panels, stage, crop tool, masks and heal/clone tools, desktop and phone layouts, shortcuts |
 | `src/presets/` | The 100 looks, how they apply, the presets panel and screen, Lightroom `.xmp` |
 | `src/assistant/` | AI assistant (in progress) |
 | `src/settings/`, `src/state/`, `src/ui/` | Settings, shared state, shared components |
