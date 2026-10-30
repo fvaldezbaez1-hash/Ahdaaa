@@ -123,3 +123,15 @@ export function mapBounds(m: Affine, x0: number, y0: number, x1: number, y1: num
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1])
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }
 }
+
+/** Normalized point of the rendered view (0…1) → mask coordinates (0…1 of the source; see Mask in edit/types). */
+export function viewToMask(src: Size, g: Geometry, uncropped: boolean, nx: number, ny: number): { x: number; y: number } {
+  const [x, y] = normalizedToSource(src, g, uncropped, nx, ny)
+  return { x: x / src.width, y: y / src.height }
+}
+
+/** Mask coordinates → normalized point of the rendered view (0…1; outside that range when cropped away). */
+export function maskToView(src: Size, g: Geometry, uncropped: boolean, mx: number, my: number): { x: number; y: number } {
+  const [x, y] = applyAffine(invertAffine(outputToSource(src, g, uncropped, { width: 1, height: 1 })), mx * src.width, my * src.height)
+  return { x, y }
+}

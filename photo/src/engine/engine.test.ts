@@ -149,3 +149,26 @@ describe('image helpers', () => {
     expect(h.luma.reduce((a, b) => a + b)).toBe(2)
   })
 })
+
+describe('mask coordinates', () => {
+  it('round-trips between the view and the source through crop, rotate, flip and straighten', async () => {
+    const { viewToMask, maskToView } = await import('./geometry')
+    const src = { width: 6000, height: 4000 }
+    const g: Geometry = { crop: { x: 0.1, y: 0.2, w: 0.6, h: 0.5 }, angle: 7, rotate: 1, flipH: true, flipV: false, aspect: 'free' }
+    for (const uncropped of [false, true]) {
+      for (const [nx, ny] of [[0.5, 0.5], [0.1, 0.9], [0.8, 0.2]]) {
+        const m = viewToMask(src, g, uncropped, nx, ny)
+        expect(m.x).toBeGreaterThanOrEqual(0)
+        expect(m.x).toBeLessThanOrEqual(1)
+        const v = maskToView(src, g, uncropped, m.x, m.y)
+        expect(v.x).toBeCloseTo(nx, 9)
+        expect(v.y).toBeCloseTo(ny, 9)
+      }
+    }
+    // No geometry: the view is the source.
+    const id: Geometry = { crop: { x: 0, y: 0, w: 1, h: 1 }, angle: 0, rotate: 0, flipH: false, flipV: false, aspect: 'original' }
+    const m = viewToMask(src, id, false, 0.25, 0.75)
+    expect(m.x).toBeCloseTo(0.25, 9)
+    expect(m.y).toBeCloseTo(0.75, 9)
+  })
+})

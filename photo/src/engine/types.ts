@@ -45,6 +45,8 @@ export interface RenderOptions {
   showClipping?: boolean
   /** Render the whole (rotated/flipped, straightened) frame without cropping — for the crop tool. */
   uncropped?: boolean
+  /** Phase 2: tint where this local layer's combined mask applies (red overlay), for the masking tools. */
+  maskOverlay?: string
 }
 
 export interface Histogram {
@@ -117,6 +119,11 @@ export interface Engine {
    * smaller. Same look as render() and the export; samplePixel/histogram then refer to this window.
    */
   renderRegion?(recipe: EditRecipe, x: number, y: number, opts?: RenderOptions): void
+  /**
+   * Phase 2: a good place to heal the spot at (x, y) radius r from (mask coordinates):
+   * nearby texture that best matches the spot's surroundings. null if none fits.
+   */
+  findHealSource?(recipe: EditRecipe, x: number, y: number, r: number): { sx: number; sy: number } | null
   /** WebGL context loss: re-upload the source and render again. */
   onContextRestored(cb: () => void): () => void
   dispose(): void
