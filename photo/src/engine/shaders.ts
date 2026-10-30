@@ -303,7 +303,8 @@ void main() {
  * color, point curve → output-linear. Every slider is the global value plus what the
  * local layers add here (u_lp0…3, summed per pixel by the LOCAL pass).
  */
-export const TONE = () => `${HEAD}
+export const TONE = (layers: boolean) => `${HEAD}
+#define LAYERS ${layers ? 1 : 0}
 uniform sampler2D u_scene;
 uniform sampler2D u_fine;
 uniform sampler2D u_coef;
@@ -433,7 +434,9 @@ void main() {
   float l0 = log2(max(dot(src.rgb, u_luma), 1e-10));
   vec2 uv = (u_toSource * vec3(gl_FragCoord.xy + u_regionOrigin, 1.0)).xy / u_fullSize;
 
+  // Without layers these stay zero and the compiler folds every local term away.
   vec4 L0 = vec4(0.0), L1 = vec4(0.0), L2 = vec4(0.0), L3 = vec4(0.0);
+#if LAYERS
   if (u_layersOn) {
     L0 = texelFetch(u_lp0, px, 0);
     L1 = texelFetch(u_lp1, px, 0);
@@ -442,6 +445,7 @@ void main() {
     // Local white balance: von Kries gains in OKLab's LMS, like a chromatic adaptation.
     if (L3.x != 0.0 || L3.y != 0.0) c = FROM_LMS * (exp2(L3.x * u_wbTemp + L3.y * u_wbTint) * (TO_LMS * c));
   }
+#endif
   float exposure = u_exposure + L0.x;
   vec3 cwb = clamp(u_curve3 + vec3(L0.y, L1.x, L1.y), -1.0, 1.0);
   float highlights = clamp(u_highlights + L0.z, -1.0, 1.0), shadows = clamp(u_shadows + L0.w, -1.0, 1.0);
@@ -520,7 +524,8 @@ void main() {
 }`
 
 /** Neighborhood finishing on the output-linear image: gamut map, sharpen, vignette, grain, clipping. → encoded. */
-export const FINISH = () => `${HEAD}
+export const FINISH = (layers: boolean) => `${HEAD}
+#define LAYERS ${layers ? 1 : 0}
 uniform sampler2D u_img;
 uniform sampler2D u_sharp;
 uniform ivec2 u_offset;      // inner tile offset inside the region textures
@@ -572,15 +577,20 @@ void main() {
   vec3 e = encode(gamutMap(s.rgb));
   if (u_sharpOn) {
     float amount = u_sharpAmount, nr = 0.0;
+#if LAYERS
     if (u_layersOn) {
       vec4 l2 = texelFetch(u_lp2, p, 0);
       amount += l2.z;
       nr = clamp(l2.w, 0.0, 1.0);
     }
+#endif
     float d = encode1(dot(s.rgb, u_outLuma)) - texelFetch(u_sharp, p, 0).r;
-    float gx = texelFetch(u_sharp, p + ivec2(1, 0), 0).r - texelFetch(u_sharp, p - ivec2(1, 0), 0).r;
-    float gy = texelFetch(u_sharp, p + ivec2(0, 1), 0).r - texelFetch(u_sharp, p - ivec2(0, 1), 0).r;
-    float grad = length(vec2(gx, gy));
+    float grad = 0.0;
+    if (u_mask.y > 0.0 || nr > 0.0) {
+      float gx = texelFetch(u_sharp, p + ivec2(1, 0), 0).r - texelFetch(u_sharp, p - ivec2(1, 0), 0).r;
+      float gy = texelFetch(u_sharp, p + ivec2(0, 1), 0).r - texelFetch(u_sharp, p - ivec2(0, 1), 0).r;
+      grad = length(vec2(gx, gy));
+    }
     if (amount > 0.0) {
       float m = u_mask.y > 0.0 ? smoothstep(u_mask.x, u_mask.y, grad) : 1.0;
       e += amount * d / (1.0 + abs(d) / u_sharpHalo) * m;
@@ -612,7 +622,9 @@ void main() {
     if (mx >= 0.999) e = vec3(1.0, 0.0, 0.0);
     else if (mx <= 0.002) e = vec3(0.0, 0.3, 1.0);
   }
+#if LAYERS
   if (u_overlayOn) e = mix(e, vec3(0.95, 0.12, 0.12), 0.5 * texelFetch(u_overlay, p, 0).r);
+#endif
   if (u_dither) e += (hash(uvec2(q)) + hash(uvec2(q) + 7919u) - 1.0) / 255.0;
   outColor = vec4(clamp(e, 0.0, 1.0), s.a);
 }`

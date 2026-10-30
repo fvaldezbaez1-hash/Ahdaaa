@@ -373,7 +373,7 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
     params.grading && Array.from(params.grading.wheels), params.grading?.balance, params.grading?.k, params.fade, frame.air, local,
   ])
   const drawTone = (t: Target, lp: Target[] | null) => {
-    const p = gpu.program('tone', TONE)
+    const p = gpu.program(lp ? 'toneLayers' : 'tone', () => TONE(!!lp))
     const m = frame.toSource
     const none = gpu.dummy()
     p.tex('u_scene', scene.target, 0).tex('u_fine', fine?.target ?? scene.target, 1).tex('u_coef', frame.guide.coef, 2)
@@ -429,7 +429,7 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
   const cellPx = 1 + (e.grainSize / 100) * 4
   const cellProc = cellPx * frame.pixelScale
   const overlay = overlayLayer ? masks.get(overlayLayer.id)?.target : undefined
-  const p = gpu.program('finish', FINISH)
+  const p = gpu.program(lp || overlay ? 'finishLayers' : 'finish', () => FINISH(!!(lp || overlay)))
   p.tex('u_img', tone.target, 0).tex('u_sharp', sharp?.target ?? tone.target, 1)
     .tex('u_lp2', lp?.[2] ?? gpu.dummy(), 2).b('u_layersOn', !!lp).tex('u_overlay', overlay ?? gpu.dummy(), 3).b('u_overlayOn', !!overlay)
     .i('u_offset', frame.inner.x - region.x, frame.inner.y - region.y).f('u_tileOrigin', frame.inner.x, frame.inner.y)

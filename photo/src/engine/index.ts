@@ -230,6 +230,11 @@ class WebGLEngine implements Engine {
   }
 
   render(recipe: EditRecipe, opts: RenderOptions = {}): void {
+    const t0 = performance.now() // PROBE
+    try { this.render0(recipe, opts) } finally { this.gpu?.gl.readPixels(0, 0, 1, 1, this.gpu.gl.RGBA, this.gpu.gl.UNSIGNED_BYTE, new Uint8Array(4)); const g = globalThis as unknown as { __lumenProbe?: { n: number; ms: number[]; size: number[]; opts: string[] } }; g.__lumenProbe ??= { n: 0, ms: [], size: [], opts: [] }; g.__lumenProbe.n++; g.__lumenProbe.ms.push(Math.round(performance.now() - t0)); g.__lumenProbe.size = [this.canvas.width, this.canvas.height]; g.__lumenProbe.opts.push(JSON.stringify(opts)) } // PROBE
+  }
+
+  private render0(recipe: EditRecipe, opts: RenderOptions = {}): void {
     const src = this.src
     if (!this.ready() || !src) return
     const uncropped = !!opts.uncropped
