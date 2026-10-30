@@ -329,7 +329,7 @@ async function phone() {
   await page.mouse.up()
   await tap('Ask AI')
   check(await page.locator('.ed-phone-ai').isVisible(), 'Ask AI covers the editor on phones')
-  await page.locator('.ed-phone-ai').getByRole('button', { name: 'Close' }).tap()
+  await page.locator('.ed-phone-ai').getByRole('button', { name: 'Back to the editor' }).tap()
   await page.getByRole('button', { name: 'Export', exact: true }).tap()
   check(await page.getByRole('dialog').isVisible(), 'phone Export opens the export sheet')
   await shot(page, 'phone-export')
