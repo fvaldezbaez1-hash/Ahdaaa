@@ -5,8 +5,12 @@ import { CropOverlay } from '../crop/CropOverlay'
 import { pickWhiteBalance } from '../panels/actions'
 import { useSession } from '../session'
 import { useView, view } from '../view'
+import { ToolHint } from '../masks/ToolHint'
+import { ToolOverlay } from '../masks/ToolOverlay'
+import { isTyping } from '../../ui/hooks'
 import { CompareOverlay } from './CompareOverlay'
 import { stageControl, StageView } from './stageView'
+import { toolBus, type ToolPointer } from './toolBus'
 
 /** Press longer than this (without moving) to see the original. */
 const HOLD_MS = 120
@@ -19,7 +23,13 @@ interface Gesture {
   panning: boolean
   holdTimer?: ReturnType<typeof setTimeout>
   lastTap?: { at: number; x: number; y: number }
+  /** A masking / healing gesture owns the (single) pointer. */
+  tool: boolean
+  /** Space held: drag pans even while a tool is active. */
+  space: boolean
 }
+
+const photoTool = (t: string | null) => t === 'mask' || t === 'heal'
 
 /**
  * The photo. Press and hold to compare with the original, pinch / Ctrl+wheel
@@ -30,7 +40,7 @@ export function Stage({ pad }: { pad: number }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const photoRef = useRef<HTMLDivElement>(null)
   const sv = useRef<StageView | null>(null)
-  const g = useRef<Gesture>({ pointers: new Map(), panning: false })
+  const g = useRef<Gesture>({ pointers: new Map(), panning: false, tool: false, space: false })
   const tool = useView((s) => s.tool)
   const eyedropper = useView((s) => s.eyedropper)
   const holding = useView((s) => s.holding)
@@ -49,7 +59,7 @@ export function Stage({ pad }: { pad: number }) {
     const ro = new ResizeObserver(([e]) => s.setStage(e.contentRect.width, e.contentRect.height, pad))
     ro.observe(stage)
     const onWheel = (e: WheelEvent) => {
-      if (view.get().tool) return
+      if (view.get().tool === 'crop') return
       const rect = stage.getBoundingClientRect()
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault()
@@ -61,8 +71,18 @@ export function Stage({ pad }: { pad: number }) {
       }
     }
     stage.addEventListener('wheel', onWheel, { passive: false })
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== ' ' || isTyping(e) || !photoTool(view.get().tool)) return
+      e.preventDefault()
+      g.current.space = e.type === 'keydown'
+      stage.classList.toggle('spacepan', g.current.space)
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKey)
     return () => {
       ro.disconnect()
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKey)
       stage.removeEventListener('wheel', onWheel)
       s.dispose()
       stageControl.attach(null)
@@ -75,6 +95,10 @@ export function Stage({ pad }: { pad: number }) {
     const r = stageRef.current!.getBoundingClientRect()
     return { x: e.clientX - r.left, y: e.clientY - r.top }
   }
+  const toolPointer = (e: PointerEvent<HTMLDivElement>): ToolPointer => {
+    const r = photoRef.current!.getBoundingClientRect()
+    return { x: e.clientX - r.left, y: e.clientY - r.top, box: { w: r.width, h: r.height }, clientX: e.clientX, clientY: e.clientY, alt: e.altKey, shift: e.shiftKey, touch: e.pointerType === 'touch' }
+  }
   const stopHold = () => {
     clearTimeout(g.current.holdTimer)
     if (view.get().holding) view.set({ holding: false })
@@ -82,7 +106,7 @@ export function Stage({ pad }: { pad: number }) {
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     const v = view.get()
-    if (v.tool || e.button > 0) return
+    if (v.tool === 'crop' || e.button > 0) return
     if (v.eyedropper) {
       const r = (session.engine.canvas as HTMLCanvasElement).getBoundingClientRect()
       const nx = (e.clientX - r.left) / r.width, ny = (e.clientY - r.top) / r.height
@@ -97,8 +121,16 @@ export function Stage({ pad }: { pad: number }) {
       st.start = { ...p, pan: s.getPan() }
       st.panning = false
       clearTimeout(st.holdTimer)
+      if (photoTool(v.tool)) {
+        // One pointer paints or drags handles; Space+drag (and two fingers) move the photo instead.
+        st.tool = !st.space && e.button === 0 && !!toolBus.get()?.down(toolPointer(e))
+        if (st.space) st.panning = true
+        return
+      }
       st.holdTimer = setTimeout(() => view.set({ holding: true }), HOLD_MS)
     } else if (st.pointers.size === 2) {
+      if (st.tool) toolBus.get()?.cancel()
+      st.tool = false
       stopHold()
       const [a, b] = [...st.pointers.values()]
       st.pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, zoom: v.zoom, pan: s.getPan() }
@@ -107,6 +139,8 @@ export function Stage({ pad }: { pad: number }) {
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     const st = g.current, s = sv.current
+    if (st.tool && st.pointers.has(e.pointerId)) return toolBus.get()?.move(toolPointer(e))
+    if (!st.pointers.size && e.pointerType !== 'touch' && photoTool(view.get().tool)) toolBus.get()?.hover(st.space ? null : toolPointer(e))
     if (!s || !st.pointers.has(e.pointerId)) return
     const p = local(e)
     st.pointers.set(e.pointerId, p)
@@ -119,7 +153,7 @@ export function Stage({ pad }: { pad: number }) {
     }
     if (!st.start) return
     const dx = p.x - st.start.x, dy = p.y - st.start.y
-    if (!st.panning && Math.hypot(dx, dy) > MOVE_PX && view.get().zoom !== 1) {
+    if (!st.panning && Math.hypot(dx, dy) > MOVE_PX && (view.get().zoom !== 1 || st.space)) {
       st.panning = true
       stopHold()
     }
@@ -131,10 +165,16 @@ export function Stage({ pad }: { pad: number }) {
     if (!st.pointers.delete(e.pointerId)) return
     if (st.pointers.size < 2) st.pinch = undefined
     if (st.pointers.size > 0) return
+    if (st.tool) {
+      st.tool = false
+      toolBus.get()?.up(toolPointer(e))
+      st.start = undefined
+      return
+    }
     stopHold()
     const p = local(e)
     // Double-tap on touch screens (double-click is handled separately for mice).
-    if (e.pointerType !== 'mouse' && !st.panning && e.type === 'pointerup') {
+    if (e.pointerType !== 'mouse' && !st.panning && e.type === 'pointerup' && !photoTool(view.get().tool)) {
       const t = st.lastTap
       if (t && performance.now() - t.at < 300 && Math.hypot(t.x - p.x, t.y - p.y) < 30) {
         sv.current?.toggleZoom(p.x, p.y)
@@ -145,7 +185,7 @@ export function Stage({ pad }: { pad: number }) {
     st.panning = false
   }
 
-  const cls = ['ed-stage', eyedropper && 'picking', zoom !== 1 && 'zoomed', tool && 'cropping'].filter(Boolean).join(' ')
+  const cls = ['ed-stage', eyedropper && 'picking', zoom !== 1 && 'zoomed', tool === 'crop' && 'cropping', photoTool(tool) && `tool-${tool}`].filter(Boolean).join(' ')
   return (
     <div
       ref={stageRef}
@@ -154,12 +194,14 @@ export function Stage({ pad }: { pad: number }) {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onPointerLeave={() => toolBus.get()?.hover(null)}
       onDoubleClick={(e) => !view.get().tool && !view.get().eyedropper && sv.current?.toggleZoom(local(e).x, local(e).y)}
     >
       <div ref={photoRef} className="ed-photo">
-        {tool === 'crop' ? <CropOverlay /> : <CompareOverlay />}
+        {tool === 'crop' ? <CropOverlay /> : photoTool(tool) ? <ToolOverlay /> : <CompareOverlay />}
       </div>
       {(holding || mode === 'before') && !tool && <span className="ed-badge">Original</span>}
+      {photoTool(tool) && <ToolHint />}
       {eyedropper && (
         <div className="ed-stage-hint" role="status">
           <Icon name="eyedropper" size={15} /> Click something that should be neutral gray or white · Esc to cancel

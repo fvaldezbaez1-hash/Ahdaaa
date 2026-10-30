@@ -55,7 +55,7 @@ export class Program {
   readonly prog: WebGLProgram
   private gl: WebGL2RenderingContext
 
-  constructor(gl: WebGL2RenderingContext, frag: string) {
+  constructor(gl: WebGL2RenderingContext, frag: string, vert = VERT) {
     this.gl = gl
     const compile = (type: number, src: string) => {
       const s = gl.createShader(type)!
@@ -69,7 +69,7 @@ export class Program {
       return s
     }
     const p = gl.createProgram()!
-    gl.attachShader(p, compile(gl.VERTEX_SHADER, VERT))
+    gl.attachShader(p, compile(gl.VERTEX_SHADER, vert))
     gl.attachShader(p, compile(gl.FRAGMENT_SHADER, frag))
     gl.linkProgram(p)
     if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error(`Program link failed: ${gl.getProgramInfoLog(p)}`)
@@ -128,6 +128,9 @@ export class Program {
   }
 }
 
+/** Texture unit for creating / uploading textures (passes bind 0…10). */
+const SCRATCH_UNIT = 15
+
 // Sized internal formats (GL enum values, so this module loads without a WebGL global).
 const INTERNAL: Record<Format, number> = { rgba16f: 0x881a, rgba32f: 0x8814, r16f: 0x822d, rgba8: 0x8058 }
 
@@ -144,10 +147,18 @@ export class Gpu {
     this.vao = gl.createVertexArray()!
   }
 
-  program(key: string, frag: () => string): Program {
+  /**
+   * Creating or uploading a texture binds it to the active unit; do that on a unit passes never
+   * use, so a texture made between a pass's tex() calls and its draw can't replace one of them.
+   */
+  private scratchUnit() {
+    this.gl.activeTexture(this.gl.TEXTURE0 + SCRATCH_UNIT)
+  }
+
+  program(key: string, frag: () => string, vert?: () => string): Program {
     let p = this.programs.get(key)
     if (!p) {
-      p = new Program(this.gl, frag())
+      p = new Program(this.gl, frag(), vert?.())
       this.programs.set(key, p)
     }
     this.gl.useProgram(p.prog)
@@ -163,6 +174,7 @@ export class Gpu {
 
   private texture(width: number, height: number, internal: number, linear: boolean): WebGLTexture {
     const gl = this.gl
+    this.scratchUnit()
     const tex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, tex)
     gl.texStorage2D(gl.TEXTURE_2D, 1, internal, width, height)
@@ -210,6 +222,7 @@ export class Gpu {
   /** RGB 16-bit integer texture from a window of an interleaved Uint16 image (no conversion, full precision). */
   uploadRgb16(data: Uint16Array, rowLength: number, x: number, y: number, width: number, height: number): Texture {
     const gl = this.gl
+    this.scratchUnit()
     const tex = gl.createTexture()!
     gl.bindTexture(gl.TEXTURE_2D, tex)
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGB16UI, width, height)
@@ -230,6 +243,7 @@ export class Gpu {
   uploadFloat(data: Float32Array, width: number, height: number, channels: 1 | 3 | 4, existing?: Texture): Texture {
     const gl = this.gl
     const [internal, format] = channels === 1 ? [gl.R32F, gl.RED] : channels === 3 ? [gl.RGB32F, gl.RGB] : [gl.RGBA32F, gl.RGBA]
+    this.scratchUnit()
     let tex = existing?.width === width && existing.height === height ? existing.tex : null
     if (!tex) {
       if (existing) gl.deleteTexture(existing.tex)
@@ -260,6 +274,74 @@ export class Gpu {
     gl.drawArrays(gl.TRIANGLES, 0, 3)
   }
 
+  /** Run the bound program over part of a target (viewport = that rectangle, so nothing else is touched). */
+  drawRect(target: Target, x: number, y: number, width: number, height: number) {
+    const gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo)
+    gl.viewport(x, y, width, height)
+    gl.bindVertexArray(this.vao)
+    gl.drawArrays(gl.TRIANGLES, 0, 3)
+  }
+
+  /** Instanced draw with a custom vertex shader (it builds its own geometry from gl_VertexID / gl_InstanceID). */
+  drawInstanced(target: Target, vertices: number, instances: number) {
+    const gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo)
+    gl.viewport(0, 0, target.width, target.height)
+    gl.bindVertexArray(this.vao)
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, vertices, instances)
+  }
+
+  /** Blending for the next draws: add (a + b), max, screen (a + b − ab), erase (b·(1 − a)). */
+  blend(mode: 'none' | 'add' | 'max' | 'screen' | 'erase') {
+    const gl = this.gl
+    if (mode === 'none') {
+      gl.disable(gl.BLEND)
+      return
+    }
+    gl.enable(gl.BLEND)
+    gl.blendEquation(mode === 'max' ? gl.MAX : gl.FUNC_ADD)
+    if (mode === 'add') gl.blendFunc(gl.ONE, gl.ONE)
+    else if (mode === 'screen') gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_COLOR)
+    else if (mode === 'erase') gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_COLOR)
+  }
+
+  private dummyTex: Target | null = null
+  /** A 1×1 texture to bind to samplers a pass doesn't use (never a pass's own target). */
+  dummy(): Target {
+    if (!this.dummyTex) {
+      this.dummyTex = this.target(1, 1, 'rgba16f')
+      this.clear(this.dummyTex)
+    }
+    return this.dummyTex
+  }
+
+  clear(target: Target, r = 0, g = 0, b = 0, a = 0) {
+    const gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo)
+    gl.viewport(0, 0, target.width, target.height)
+    gl.clearColor(r, g, b, a)
+    gl.clear(gl.COLOR_BUFFER_BIT)
+  }
+
+  /** A framebuffer writing several same-size targets at once (layout(location = i) outputs). */
+  multi(targets: Target[]): WebGLFramebuffer {
+    const gl = this.gl
+    const fbo = gl.createFramebuffer()!
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+    targets.forEach((t, i) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, t.tex, 0))
+    gl.drawBuffers(targets.map((_, i) => gl.COLOR_ATTACHMENT0 + i))
+    return fbo
+  }
+
+  drawMulti(fbo: WebGLFramebuffer, width: number, height: number) {
+    const gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo)
+    gl.viewport(0, 0, width, height)
+    gl.bindVertexArray(this.vao)
+    gl.drawArrays(gl.TRIANGLES, 0, 3)
+  }
+
   /** Read a target back: RGBA8 → bytes, float targets → Float32. */
   read(t: Target, x = 0, y = 0, width = t.width, height = t.height): Uint8Array | Float32Array {
     const gl = this.gl
@@ -282,6 +364,8 @@ export class Gpu {
   }
 
   dispose() {
+    this.destroy(this.dummyTex)
+    this.dummyTex = null
     this.trim()
     this.programs.forEach((p) => this.gl.deleteProgram(p.prog))
     this.programs.clear()

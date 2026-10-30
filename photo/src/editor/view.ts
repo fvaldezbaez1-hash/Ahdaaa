@@ -1,12 +1,30 @@
 import { useSyncExternalStore } from 'react'
 import { useMediaQuery } from '../ui/hooks'
 import type { Histogram, ViewMode } from '../engine/types'
+import type { MaskKind } from './masks/model'
 
 // UI state of the editing screen that several parts share (toolbar, stage,
 // panels) but that isn't part of the photo's recipe. The stage subscribes
 // directly so changes repaint without re-rendering React.
 
-export type Tool = 'crop' | null
+export type Tool = 'crop' | 'mask' | 'heal' | null
+
+export interface BrushSettings {
+  /** 0…100, see masks/brush.ts sizeToRadius. */
+  size: number
+  feather: number
+  /** 1…100 % per dab. */
+  flow: number
+  erase: boolean
+}
+
+export interface HealSettings {
+  size: number
+  feather: number
+  /** 1…100 %. */
+  opacity: number
+  mode: 'heal' | 'clone'
+}
 export type SheetId = 'export' | 'paste' | 'shortcuts' | null
 
 export interface ViewState {
@@ -33,11 +51,27 @@ export interface ViewState {
   ai: boolean
   /** Desktop: the presets & history column, shown by default only on wide screens. */
   leftPanel: { wide: boolean; narrow: boolean }
+  /** Masking: the selected local layer and the mask whose handles are shown. */
+  layer: string | null
+  mask: string | null
+  /** Tint the selected layer's mask red (O). */
+  overlay: boolean
+  /** The next drag on the photo draws this new gradient (instead of editing it). */
+  placing: MaskKind | null
+  /** Range mask: the next click on the photo samples a color / brightness. */
+  rangePick: boolean
+  brush: BrushSettings
+  /** Healing: settings for new spots, and the selected spot. */
+  heal: HealSettings
+  spot: string | null
 }
 
 const initial: ViewState = {
   mode: 'after', split: 0.5, holding: false, clipping: false, tool: null, eyedropper: false, leveling: false, grid: 'none', zoom: 1, zoom100: 1, histogram: null,
   sheet: null, ai: false, leftPanel: { wide: true, narrow: false },
+  layer: null, mask: null, overlay: true, placing: null, rangePick: false, spot: null,
+  brush: { size: 50, feather: 50, flow: 100, erase: false },
+  heal: { size: 40, feather: 50, opacity: 100, mode: 'heal' },
 }
 
 let state = initial
@@ -52,10 +86,10 @@ export const view = {
     state = { ...state, ...patch }
     listeners.forEach((l) => l())
   },
-  /** Fresh state for a newly opened photo (keeps the compare mode, clipping and panel choices). */
+  /** Fresh state for a newly opened photo (keeps the compare mode, clipping, panel and brush choices). */
   reset() {
-    const { split, clipping, ai, leftPanel } = state
-    view.set({ ...initial, mode: state.mode === 'before' ? 'after' : state.mode, split, clipping, ai, leftPanel })
+    const { split, clipping, ai, leftPanel, overlay, brush, heal } = state
+    view.set({ ...initial, mode: state.mode === 'before' ? 'after' : state.mode, split, clipping, ai, leftPanel, overlay, brush, heal })
   },
   subscribe(fn: () => void) {
     listeners.add(fn)

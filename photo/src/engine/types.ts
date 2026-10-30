@@ -45,6 +45,17 @@ export interface RenderOptions {
   showClipping?: boolean
   /** Render the whole (rotated/flipped, straightened) frame without cropping — for the crop tool. */
   uncropped?: boolean
+  /** Phase 2: tint where this local layer's combined mask applies (red overlay), for the masking tools. */
+  maskOverlay?: string
+}
+
+export interface SampleOptions {
+  /**
+   * Phase 2: sample the photo as developed with the global settings, before local layers —
+   * what range masks measure — instead of the source. Returns display-encoded RGB (0…1, the
+   * canvas's color space); `radius` is then in canvas pixels.
+   */
+  developed?: boolean
 }
 
 export interface Histogram {
@@ -95,7 +106,7 @@ export interface Engine {
    * Average SOURCE pixel (linear, in the source's space) around a point given in
    * normalized coordinates of the last rendered frame (0…1). For the WB eyedropper.
    */
-  samplePixel(nx: number, ny: number, radius?: number): Vec3 | null
+  samplePixel(nx: number, ny: number, radius?: number, opts?: SampleOptions): Vec3 | null
   /** Suggested Auto settings for the current source (tone + white balance). */
   auto(recipe: EditRecipe): { basic: Partial<Basic>; wb?: { temp: number; tint: number } }
   /**
@@ -117,6 +128,11 @@ export interface Engine {
    * smaller. Same look as render() and the export; samplePixel/histogram then refer to this window.
    */
   renderRegion?(recipe: EditRecipe, x: number, y: number, opts?: RenderOptions): void
+  /**
+   * Phase 2: a good place to heal the spot at (x, y) radius r from (mask coordinates):
+   * nearby texture that best matches the spot's surroundings. null if none fits.
+   */
+  findHealSource?(recipe: EditRecipe, x: number, y: number, r: number): { sx: number; sy: number } | null
   /** WebGL context loss: re-upload the source and render again. */
   onContextRestored(cb: () => void): () => void
   dispose(): void

@@ -10,12 +10,12 @@ const f = (x: number) => (Number.isInteger(x) ? x.toFixed(1) : String(x))
 /** Row-major → GLSL's column-major constructor. */
 const mat = (m: Mat3) => `mat3(${[m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]].map(f).join(', ')})`
 
-const HEAD = `#version 300 es
+/** Shared prelude without an output (MRT shaders declare their own). */
+export const PRELUDE = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2D;
 precision highp usampler2D;
-out vec4 outColor;
 const float LOG2_MID = -2.4739312;
 float encode1(float x) { x = max(x, 0.0); return x <= 0.0031308 ? 12.92 * x : 1.055 * pow(x, 1.0 / 2.4) - 0.055; }
 vec3 encode(vec3 x) { return vec3(encode1(x.r), encode1(x.g), encode1(x.b)); }
@@ -26,6 +26,8 @@ float hash(uvec2 p) {
   h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
   return float(h) / 4294967295.0;
 }
+`
+export const HEAD = `${PRELUDE}out vec4 outColor;
 `
 
 // Shared by develop (full res) and the low-res guide: white balance, clipped
@@ -296,8 +298,13 @@ void main() {
   }
 }`
 
-/** The main per-pixel pass: dehaze, exposure, local tone, tone curve, color, point curve → output-linear. */
-export const TONE = () => `${HEAD}
+/**
+ * The main per-pixel pass: local white balance, dehaze, exposure, local tone, tone curve,
+ * color, point curve → output-linear. Every slider is the global value plus what the
+ * local layers add here (u_lp0…3, summed per pixel by the LOCAL pass).
+ */
+export const TONE = (layers: boolean) => `${HEAD}
+#define LAYERS ${layers ? 1 : 0}
 uniform sampler2D u_scene;
 uniform sampler2D u_fine;
 uniform sampler2D u_coef;
@@ -305,6 +312,11 @@ uniform sampler2D u_haze;
 uniform sampler2D u_toneLut;
 uniform sampler2D u_hueLut;
 uniform sampler2D u_curveLut;
+uniform sampler2D u_lp0;
+uniform sampler2D u_lp1;
+uniform sampler2D u_lp2;
+uniform sampler2D u_lp3;
+uniform bool u_layersOn;
 uniform mat3 u_toWorking;
 uniform vec3 u_luma;
 uniform mat3 u_toSource;
@@ -318,8 +330,11 @@ uniform float u_shadows;
 uniform float u_clarity;
 uniform float u_texture;
 uniform float u_dehaze;
+uniform bool u_hazeOn;
 uniform vec3 u_air;
-uniform bool u_toneOn;
+uniform bool u_raw;
+uniform vec3 u_curve3;      // contrast, whites, blacks (global + profile)
+uniform float u_contrastExp;
 uniform bool u_colorOn;
 uniform bool u_hueOn;
 uniform bool u_bw;
@@ -331,6 +346,8 @@ uniform vec2 u_gradeShape;
 uniform float u_fade;
 uniform bool u_curveOn;
 uniform mat3 u_toOutput;
+uniform vec3 u_wbTemp;      // LMS log2 gains per unit of local temperature / tint
+uniform vec3 u_wbTint;
 const mat3 TO_LMS = ${mat(REC2020_TO_LMS)};
 const mat3 FROM_LMS = ${mat(LMS_TO_REC2020)};
 const mat3 M2 = ${mat(OKLAB_M2)};
@@ -353,7 +370,7 @@ float rampDown(float x, float y0, float y1) {
   float t = (x - y0) / w;
   return w * (t * t * t - t + 0.5 * (1.0 - t * t * t * t));
 }
-float tone(float x) {
+float filmicLut(float x) {
   const float x0 = ${f(2 ** LUT_LOG_MIN)};
   if (x <= x0) return x * texelFetch(u_toneLut, ivec2(0), 0).r / x0;
   float fi = min((log2(x) - ${f(LUT_LOG_MIN)}) * ${f((LUT_SIZE - 1) / (LUT_LOG_MAX - LUT_LOG_MIN))}, ${f(LUT_SIZE - 1)});
@@ -362,12 +379,40 @@ float tone(float x) {
   float b = texelFetch(u_toneLut, ivec2(min(i + 1, ${LUT_SIZE - 1}), 0), 0).r;
   return mix(a, b, fi - float(i));
 }
+// Display sources: identity up to a knee, then roll off so xmax (what exposure can reach) maps to 1.
+float shoulder(float x, float xmax) {
+  if (xmax <= 1.0 || x <= 0.0) return min(x, 1.0);
+  float knee = max(0.45, 1.0 - 0.5 * log2(xmax));
+  if (x <= knee) return x;
+  float t = min(1.0, (x - knee) / (xmax - knee));
+  return knee + (1.0 - knee) * (1.0 - pow(1.0 - t, (xmax - knee) / (1.0 - knee)));
+}
+// Contrast S-curve with a fixed pivot (see tone.ts contrastCurve).
+float contrastCurve(float p, float k) {
+  if (k == 0.0 || p <= 0.0 || p >= 1.0) return p;
+  const float S = 5.5;
+  float s0 = 1.0 / (1.0 + exp(S * 0.5)), s1 = 1.0 / (1.0 + exp(-S * 0.5));
+  float q = pow(p, u_contrastExp);
+  float t;
+  if (k > 0.0) t = (1.0 / (1.0 + exp(-S * (q - 0.5))) - s0) / (s1 - s0);
+  else { float y = s0 + q * (s1 - s0); t = 0.5 + log(y / (1.0 - y)) / S; }
+  return pow(clamp(q + abs(k) * (t - q), 0.0, 1.0), 1.0 / u_contrastExp);
+}
+// The global curve for one channel value: base curve, then contrast, whites, blacks (γ 2.2 domain).
+float toneCurve(float x, float xmax, vec3 cwb) {
+  float y = u_raw ? filmicLut(x) : shoulder(x, xmax);
+  if (x <= 0.0 || cwb == vec3(0.0)) return y;
+  float p = pow(clamp(y, 0.0, 1.0), 1.0 / 2.2);
+  p = contrastCurve(p, cwb.x);
+  p += cwb.y * 0.25 * p * p * p + cwb.z * 0.12 * pow(1.0 - min(p, 1.0), 5.0);
+  return pow(clamp(p, 0.0, 1.0), 2.2);
+}
 // Adobe's hue-preserving RGB tone: curve the largest and smallest channel, interpolate the middle one.
-vec3 rgbTone(vec3 c) {
+vec3 rgbTone(vec3 c, float xmax, vec3 cwb) {
   float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
-  float tmx = tone(mx);
+  float tmx = toneCurve(mx, xmax, cwb);
   if (mx - mn < 1e-9) return vec3(tmx);
-  float tmn = tone(mn);
+  float tmn = toneCurve(mn, xmax, cwb);
   return tmn + (tmx - tmn) * (c - mn) / (mx - mn);
 }
 vec4 hueLut(float deg) {
@@ -389,40 +434,60 @@ void main() {
   float l0 = log2(max(dot(src.rgb, u_luma), 1e-10));
   vec2 uv = (u_toSource * vec3(gl_FragCoord.xy + u_regionOrigin, 1.0)).xy / u_fullSize;
 
-  if (u_dehaze != 0.0) {
+  // Without layers these stay zero and the compiler folds every local term away.
+  vec4 L0 = vec4(0.0), L1 = vec4(0.0), L2 = vec4(0.0), L3 = vec4(0.0);
+#if LAYERS
+  if (u_layersOn) {
+    L0 = texelFetch(u_lp0, px, 0);
+    L1 = texelFetch(u_lp1, px, 0);
+    L2 = texelFetch(u_lp2, px, 0);
+    L3 = texelFetch(u_lp3, px, 0);
+    // Local white balance: von Kries gains in OKLab's LMS, like a chromatic adaptation.
+    if (L3.x != 0.0 || L3.y != 0.0) c = FROM_LMS * (exp2(L3.x * u_wbTemp + L3.y * u_wbTint) * (TO_LMS * c));
+  }
+#endif
+  float exposure = u_exposure + L0.x;
+  vec3 cwb = clamp(u_curve3 + vec3(L0.y, L1.x, L1.y), -1.0, 1.0);
+  float highlights = clamp(u_highlights + L0.z, -1.0, 1.0), shadows = clamp(u_shadows + L0.w, -1.0, 1.0);
+  float texture_ = clamp(u_texture + L1.z, -1.0, 1.0), clarity = clamp(u_clarity + L1.w, -1.0, 1.0);
+  float dehaze = clamp(u_dehaze + L2.x, -1.0, 1.0);
+
+  if (u_hazeOn && dehaze != 0.0) {
     vec2 ab = texture(u_haze, uv).rg;
     float tr = clamp(ab.x * (l0 - LOG2_MID) + ab.y, 0.05, 1.0);
-    if (u_dehaze > 0.0) {
-      float te = max(1.0 - u_dehaze * (1.0 - tr), 0.12);
+    if (dehaze > 0.0) {
+      float te = max(1.0 - dehaze * (1.0 - tr), 0.12);
       c = max((c - u_air * (1.0 - te)) / te, 0.0);
-    } else c = mix(c, u_air, -u_dehaze * (0.25 + 0.5 * (1.0 - tr)));
+    } else c = mix(c, u_air, -dehaze * (0.25 + 0.5 * (1.0 - tr)));
   }
-  c *= exp2(u_exposure);
+  c *= exp2(exposure);
 
   if (u_local) {
     // Edge-aware base (B, coarse) from the low-res guided filter applied to this pixel's own
     // luminance (fast guided filter: edges stay pixel-sharp). F = small Gaussian of the luminance;
     // the mid layer M applies its coefficients to F, so the clarity band F−M never holds fine detail.
     vec4 g = texture(u_coef, uv);
-    float l = l0 + u_exposure;
-    float F = u_fineOn ? texelFetch(u_fine, px, 0).r + u_exposure : l;
-    float B = g.x * (l0 - LOG2_MID) + g.y + LOG2_MID + u_exposure;
-    float M = g.z * (F - u_exposure - LOG2_MID) + g.w + LOG2_MID + u_exposure;
+    float l = l0 + exposure;
+    float F = u_fineOn ? texelFetch(u_fine, px, 0).r + exposure : l;
+    float B = g.x * (l0 - LOG2_MID) + g.y + LOG2_MID + exposure;
+    float M = g.z * (F - exposure - LOG2_MID) + g.w + LOG2_MID + exposure;
     float xb = B - LOG2_MID;
-    float tb = xb + u_highlights * (u_highlights < 0.0 ? 0.75 : 0.5) * rampUp(xb, -1.0, 2.5)
-                  + u_shadows * (u_shadows > 0.0 ? 0.7 : 0.5) * rampDown(xb, -5.0, 0.5);
+    float tb = xb + highlights * (highlights < 0.0 ? 0.75 : 0.5) * rampUp(xb, -1.0, 2.5)
+                  + shadows * (shadows > 0.0 ? 0.7 : 0.5) * rampDown(xb, -5.0, 0.5);
     float ln = tb + LOG2_MID + (l - B);
-    float mid = (F - M) * u_clarity * 1.3 / (1.0 + pow(xb / 3.0, 4.0));
+    float mid = (F - M) * clarity * 1.3 / (1.0 + pow(xb / 3.0, 4.0));
     ln += mid / sqrt(1.0 + mid * mid);
     float d = l - F;
-    float t = d * u_texture * (u_texture > 0.0 ? 1.2 * d * d / (d * d + 0.0009) : 0.9) * smoothstep(-8.0, -5.0, xb);
+    float t = d * texture_ * (texture_ > 0.0 ? 1.2 * d * d / (d * d + 0.0009) : 0.9) * smoothstep(-8.0, -5.0, xb);
     ln += t / sqrt(1.0 + 4.0 * t * t);
     c *= exp2(ln - l);
   }
 
-  if (u_toneOn) c = rgbTone(c);
+  float xmax = max(1.0, exp2(exposure));
+  if (u_raw || xmax > 1.0 || cwb != vec3(0.0)) c = rgbTone(c, xmax, cwb);
 
-  if (u_colorOn) {
+  float sat = max(u_sat + L2.y, -1.0);
+  if (u_colorOn || sat != u_sat || L3.z != 0.0 || L3.w != 0.0) {
     vec3 lab = toOklab(c);
     float L = lab.x, C = length(lab.yz), h = atan(lab.z, lab.y);
     float cw = smoothstep(0.0, 0.08, C);
@@ -437,9 +502,9 @@ void main() {
       float skin = exp(-pow((hd - 50.0) / 22.0, 2.0));
       float v = u_vib > 0.0 ? 1.0 + u_vib * 0.9 * (1.0 - smoothstep(0.0, 0.22, C)) * (1.0 - 0.6 * skin)
                             : 1.0 + u_vib * 0.7 * (1.0 - 0.4 * smoothstep(0.0, 0.2, C));
-      C *= max(v, 0.0) * max(1.0 + (u_sat > 0.0 ? 0.8 : 1.0) * u_sat, 0.0);
+      C *= max(v, 0.0) * max(1.0 + (sat > 0.0 ? 0.8 : 1.0) * sat, 0.0);
     }
-    vec2 ab = C * vec2(cos(h), sin(h));
+    vec2 ab = C * vec2(cos(h), sin(h)) + L3.zw;
     if (u_gradeOn) {
       float tt = pow(clamp(L, 0.0, 1.0), u_gradeShape.x);
       float ws = pow(1.0 - tt, u_gradeShape.y), wh = pow(tt, u_gradeShape.y), wm = max(0.0, 1.0 - ws - wh);
@@ -459,7 +524,8 @@ void main() {
 }`
 
 /** Neighborhood finishing on the output-linear image: gamut map, sharpen, vignette, grain, clipping. → encoded. */
-export const FINISH = () => `${HEAD}
+export const FINISH = (layers: boolean) => `${HEAD}
+#define LAYERS ${layers ? 1 : 0}
 uniform sampler2D u_img;
 uniform sampler2D u_sharp;
 uniform ivec2 u_offset;      // inner tile offset inside the region textures
@@ -477,6 +543,10 @@ uniform float u_grain;
 uniform vec3 u_grainShape;   // cell (full-res px), roughness, full-res px per output px
 uniform bool u_clip;
 uniform bool u_dither;
+uniform bool u_layersOn;
+uniform sampler2D u_lp2;     // local (dehaze, saturation, sharpness, noise)
+uniform bool u_overlayOn;
+uniform sampler2D u_overlay; // a layer's mask, tinted red for the masking tools
 
 // Hue-preserving gamut map: desaturate toward the pixel's own luminance, softly from u_knee.
 vec3 gamutMap(vec3 c) {
@@ -506,15 +576,27 @@ void main() {
   vec4 s = texelFetch(u_img, p, 0);
   vec3 e = encode(gamutMap(s.rgb));
   if (u_sharpOn) {
+    float amount = u_sharpAmount, nr = 0.0;
+#if LAYERS
+    if (u_layersOn) {
+      vec4 l2 = texelFetch(u_lp2, p, 0);
+      amount += l2.z;
+      nr = clamp(l2.w, 0.0, 1.0);
+    }
+#endif
     float d = encode1(dot(s.rgb, u_outLuma)) - texelFetch(u_sharp, p, 0).r;
-    d /= 1.0 + abs(d) / u_sharpHalo;
-    float m = 1.0;
-    if (u_mask.y > 0.0) {
+    float grad = 0.0;
+    if (u_mask.y > 0.0 || nr > 0.0) {
       float gx = texelFetch(u_sharp, p + ivec2(1, 0), 0).r - texelFetch(u_sharp, p - ivec2(1, 0), 0).r;
       float gy = texelFetch(u_sharp, p + ivec2(0, 1), 0).r - texelFetch(u_sharp, p - ivec2(0, 1), 0).r;
-      m = smoothstep(u_mask.x, u_mask.y, length(vec2(gx, gy)));
+      grad = length(vec2(gx, gy));
     }
-    e += u_sharpAmount * d * m;
+    if (amount > 0.0) {
+      float m = u_mask.y > 0.0 ? smoothstep(u_mask.x, u_mask.y, grad) : 1.0;
+      e += amount * d / (1.0 + abs(d) / u_sharpHalo) * m;
+    } else e += max(amount, -1.0) * d; // negative sharpness: soften toward the blurred luminance
+    // Local noise reduction: smooth flat areas, keep edges.
+    if (nr > 0.0) e -= 0.9 * nr * d * (1.0 - smoothstep(0.02, 0.08, grad));
   }
   vec2 q = gl_FragCoord.xy + u_tileOrigin;
   if (u_vig != 0.0) {
@@ -540,6 +622,9 @@ void main() {
     if (mx >= 0.999) e = vec3(1.0, 0.0, 0.0);
     else if (mx <= 0.002) e = vec3(0.0, 0.3, 1.0);
   }
+#if LAYERS
+  if (u_overlayOn) e = mix(e, vec3(0.95, 0.12, 0.12), 0.5 * texelFetch(u_overlay, p, 0).r);
+#endif
   if (u_dither) e += (hash(uvec2(q)) + hash(uvec2(q) + 7919u) - 1.0) / 255.0;
   outColor = vec4(clamp(e, 0.0, 1.0), s.a);
 }`

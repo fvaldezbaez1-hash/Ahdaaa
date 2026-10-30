@@ -8,7 +8,9 @@ import { applyAffine, cropRectInUncropped, invertAffine, normalizedToSource, out
 import { binHistogram } from './histogram'
 import { areaDownscale, averagePixel, boxReduce } from './image'
 import { bandWeights, buildCurveLut, frameParams, wheelDirection } from './params'
-import { contrastCurve, displayShoulder, filmic, FILMIC, MID_GRAY, sampleToneLut, toneCurve, toneIsIdentity, buildToneLut, type ToneSpec } from './tone'
+import { buildFilmicLut, contrastCurve, contrastExponent, displayShoulder, filmic, FILMIC, MID_GRAY, sampleToneLut, toneCurve, type ToneSpec } from './tone'
+import { brushValue, combineMask, hueSat, layerVector, linearValue, radialValue, rangeColorValue, rangeLuminanceValue, activeLayers } from './masks'
+import { findHealSource, retouchWindow } from './heal'
 import type { SourceColor } from './types'
 
 const geo = (g: Partial<Geometry> = {}): Geometry => ({ crop: { x: 0, y: 0, w: 1, h: 1 }, angle: 0, rotate: 0, flipH: false, flipV: false, aspect: 'original', ...g })
@@ -61,7 +63,8 @@ describe('tone', () => {
   })
   it('display sources are untouched at default and roll off highlights when brightened', () => {
     const spec: ToneSpec = { kind: 'display', filmic: FILMIC, xmax: 1, contrast: 0, whites: 0, blacks: 0 }
-    expect(toneIsIdentity(spec)).toBe(true)
+    const f = toneCurve(spec)
+    for (const x of [0.001, 0.18, 0.9]) expect(f(x)).toBeCloseTo(x, 9)
     expect(displayShoulder(0.4, 2)).toBe(0.4)
     expect(displayShoulder(2, 2)).toBeCloseTo(1, 6)
     expect(displayShoulder(1, 2)).toBeLessThan(1)
@@ -78,10 +81,10 @@ describe('tone', () => {
     }
     expect(contrastCurve(0.2, 1, 0.46)).toBeLessThan(0.2)
   })
-  it('the LUT reproduces the curve', () => {
-    const spec: ToneSpec = { kind: 'raw', filmic: FILMIC, xmax: 1, contrast: 0.3, whites: -0.2, blacks: 0.1 }
-    const lut = buildToneLut(spec), f = toneCurve(spec)
-    for (const x of [1e-5, 0.003, 0.05, 0.18, 0.6, 1.3, 9]) expect(Math.abs(sampleToneLut(lut, x) - f(x))).toBeLessThan(2e-4)
+  it('the filmic LUT reproduces the curve, and the contrast pivot is middle gray', () => {
+    const lut = buildFilmicLut(FILMIC)
+    for (const x of [1e-5, 0.003, 0.05, 0.18, 0.6, 1.3, 9]) expect(Math.abs(sampleToneLut(lut, x) - filmic(x, FILMIC))).toBeLessThan(2e-4)
+    expect((filmic(MID_GRAY, FILMIC) ** (1 / 2.2)) ** contrastExponent('raw', FILMIC)).toBeCloseTo(0.5, 9)
   })
 })
 
@@ -92,7 +95,7 @@ describe('params', () => {
   })
   it('a default display recipe is an identity pipeline', () => {
     const p = frameParams(defaultRecipe('display'), { kind: 'display', space: 'srgb-linear' })
-    expect([p.toneIdentity, p.hueLut, p.curveLut, p.grading, p.saturation, p.vibrance, p.fade]).toEqual([true, null, null, null, 0, 0, 0])
+    expect([p.contrast, p.whites, p.blacks, p.hueLut, p.curveLut, p.grading, p.saturation, p.vibrance, p.fade]).toEqual([0, 0, 0, null, null, null, 0, 0, 0])
   })
   it('RAW white balance at the as-shot temperature changes nothing', () => {
     const color: SourceColor = { kind: 'raw', space: 'camera', rgbCam: mat3([[1.9, -0.8, -0.1], [-0.2, 1.5, -0.3], [0, -0.5, 1.5]]), camXyz: mat3([[0.6972, -0.2408, -0.06], [-0.433, 1.2101, 0.2515], [-0.0388, 0.1277, 0.5847]]), shotMul: [2.5, 1, 1.5] }
@@ -147,5 +150,114 @@ describe('image helpers', () => {
     expect(h.r[255]).toBe(1)
     expect(h.clippedHigh).toBeCloseTo(0.5)
     expect(h.luma.reduce((a, b) => a + b)).toBe(2)
+  })
+})
+
+describe('mask coordinates', () => {
+  it('round-trips between the view and the source through crop, rotate, flip and straighten', async () => {
+    const { viewToMask, maskToView } = await import('./geometry')
+    const src = { width: 6000, height: 4000 }
+    const g: Geometry = { crop: { x: 0.1, y: 0.2, w: 0.6, h: 0.5 }, angle: 7, rotate: 1, flipH: true, flipV: false, aspect: 'free' }
+    for (const uncropped of [false, true]) {
+      for (const [nx, ny] of [[0.5, 0.5], [0.1, 0.9], [0.8, 0.2]]) {
+        const m = viewToMask(src, g, uncropped, nx, ny)
+        expect(m.x).toBeGreaterThanOrEqual(0)
+        expect(m.x).toBeLessThanOrEqual(1)
+        const v = maskToView(src, g, uncropped, m.x, m.y)
+        expect(v.x).toBeCloseTo(nx, 9)
+        expect(v.y).toBeCloseTo(ny, 9)
+      }
+    }
+    // No geometry: the view is the source.
+    const id: Geometry = { crop: { x: 0, y: 0, w: 1, h: 1 }, angle: 0, rotate: 0, flipH: false, flipV: false, aspect: 'original' }
+    const m = viewToMask(src, id, false, 0.25, 0.75)
+    expect(m.x).toBeCloseTo(0.25, 9)
+    expect(m.y).toBeCloseTo(0.75, 9)
+  })
+})
+
+describe('masks', () => {
+  it('linear: full on the first side, none past the second, smooth between', () => {
+    expect(linearValue(0, 0, 10, 0, 20, 0)).toBe(1)
+    expect(linearValue(25, 3, 10, 0, 20, 0)).toBe(0)
+    expect(linearValue(15, 9, 10, 0, 20, 0)).toBeCloseTo(0.5, 9)
+  })
+  it('radial: full inside, feather falloff over the outer part, rotation and antialiasing', () => {
+    const v = (x: number, y: number, f: number, angle = 0) => radialValue(x, y, 100, 100, 50, 20, angle, f, 0.01)
+    expect(v(100, 100, 0.5)).toBe(1)
+    expect(v(124, 100, 0.5)).toBe(1) // inside the unfeathered core (d = 0.48)
+    expect(v(137.5, 100, 0.5)).toBeCloseTo(0.5, 6) // halfway through the soft band (d = 0.75)
+    expect(v(151, 100, 0.5)).toBe(0)
+    expect(v(100, 130, 0)).toBe(0) // ry = 20
+    expect(v(100, 130, 0, 90)).toBe(1) // rotated 90°: the long axis is vertical
+    expect(v(149.9, 100, 0)).toBeGreaterThan(0) // hard edge, still antialiased
+    expect(v(149.9, 100, 0)).toBeLessThan(1)
+  })
+  it('combines in order: add = union, subtract, intersect, invert', () => {
+    expect(combineMask(0, 0.3, 'subtract', false, true)).toBe(0.3) // the first mask always starts the layer
+    expect(combineMask(0.4, 0.7, 'add', false, false)).toBe(0.7)
+    expect(combineMask(0.8, 0.25, 'subtract', false, false)).toBeCloseTo(0.6, 9)
+    expect(combineMask(0.8, 0.5, 'intersect', false, false)).toBeCloseTo(0.4, 9)
+    expect(combineMask(0.8, 0.25, 'intersect', true, false)).toBeCloseTo(0.6, 9)
+  })
+  it('brush: strokes are unions at their flow, build up, and erase strokes remove', () => {
+    const stroke = { points: [[0, 0], [100, 0]] as [number, number][], r: 10, feather: 0, flow: 0.5 }
+    expect(brushValue(50, 0, [stroke], 0.5)).toBeCloseTo(0.5, 9) // overlapping segments don't stack within a stroke
+    expect(brushValue(50, 0, [stroke, stroke], 0.5)).toBeCloseTo(0.75, 9) // a second stroke builds up
+    expect(brushValue(50, 0, [stroke, { ...stroke, flow: 1, erase: true }], 0.5)).toBe(0)
+    expect(brushValue(50, 20, [stroke], 0.5)).toBe(0)
+    const soft = { ...stroke, feather: 0.5, flow: 1 }
+    expect(brushValue(50, 4, [soft], 0.5)).toBe(1)
+    expect(brushValue(50, 7.5, [soft], 0.5)).toBeCloseTo(0.5, 6)
+  })
+  it('range: selects by luminance and by color on a synthetic image', () => {
+    const lum = [0.05, 0.3, 0.5, 0.7, 0.95].map((l) => rangeLuminanceValue(l, 40, 60, 0))
+    expect(lum.map((v) => Math.round(v))).toEqual([0, 0, 1, 0, 0])
+    // A blue sky pixel vs foliage and skin, sampled sky = hue 210°, sat 60.
+    const pick = (r: number, g: number, b: number) => { const { h, s } = hueSat(r, g, b); return rangeColorValue(h, s, 210, 60, 20, 10) }
+    expect(pick(0.35, 0.6, 0.9)).toBeGreaterThan(0.9)
+    expect(pick(0.3, 0.6, 0.2)).toBe(0)
+    expect(pick(0.9, 0.7, 0.6)).toBe(0)
+    expect(hueSat(0.5, 0.5, 0.5).s).toBe(0)
+  })
+  it('layers: a layer without masks or changes does nothing; opacity scales its numbers', () => {
+    const layer = { id: 'a', name: 'A', enabled: true, opacity: 0.5, masks: [{ id: 'm', type: 'linear' as const, x1: 0, y1: 0, x2: 1, y2: 1, mode: 'add' as const, invert: false }], adjust: { exposure: 1, shadows: 40 } }
+    expect(activeLayers([layer, { ...layer, adjust: {} }, { ...layer, masks: [] }])).toHaveLength(1)
+    const v = layerVector(layer.adjust, layer.opacity)
+    expect(v[0]).toBe(0.5)
+    expect(v[3]).toBeCloseTo(0.2, 6)
+  })
+})
+
+describe('healing', () => {
+  // A smooth gradient with a dark blemish at (40, 40): the best source is clean gradient nearby.
+  const W = 120, H = 80
+  const data = new Uint16Array(W * H * 3)
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const base = 0.3 + (0.4 * x) / W
+      const blemish = Math.hypot(x - 40, y - 40) < 4 ? 0.3 : 1
+      // Stripes above the spot make that direction a bad match.
+      const stripes = y < 30 && x > 30 && x < 50 && x % 4 < 2 ? 0.5 : 1
+      data.set([0, 1, 2].map(() => Math.round(base * blemish * stripes * 65535)), (y * W + x) * 3)
+    }
+  const img = { width: W, height: H, data }
+  it('finds a clean, similar patch near the spot, inside the image and away from other spots', () => {
+    const r = 6 / W
+    const s = findHealSource(img, [], 40 / W, 40 / H, r)!
+    const dx = s.sx * W - 40, dy = s.sy * H - 40
+    expect(Math.hypot(dx, dy)).toBeGreaterThanOrEqual(1.5 * 6 - 1e-6)
+    expect(Math.hypot(dx, dy)).toBeLessThanOrEqual(4 * 6 + 1e-6)
+    expect(dy).toBeGreaterThan(-8) // not from the striped area above
+    expect(Math.abs(dx)).toBeLessThan(15) // similar brightness: along the gradient's iso-lines
+    const other = { id: 'o', mode: 'heal' as const, x: s.sx, y: s.sy, r, sx: 0.9, sy: 0.5, feather: 50, opacity: 1 }
+    const s2 = findHealSource(img, [other], 40 / W, 40 / H, r)!
+    expect(Math.hypot(s2.sx * W - s.sx * W, s2.sy * H - s.sy * H)).toBeGreaterThan(2 * 6)
+  })
+  it('grows a window to include the sources its spots copy from', () => {
+    const spot = { id: 's', mode: 'clone' as const, x: 0.1, y: 0.1, r: 0.01, sx: 0.8, sy: 0.8, feather: 0, opacity: 1 }
+    const w = retouchWindow([spot], 1000, 1000, { x0: 0, y0: 0, x1: 200, y1: 200 })
+    expect(w.x1).toBeGreaterThan(800)
+    expect(retouchWindow([spot], 1000, 1000, { x0: 500, y0: 0, x1: 600, y1: 50 })).toEqual({ x0: 500, y0: 0, x1: 600, y1: 50 })
   })
 })

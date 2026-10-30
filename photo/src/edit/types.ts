@@ -141,23 +141,88 @@ export interface Geometry {
 
 export type Treatment = 'color' | 'bw'
 
-/** Masks for local adjustments (Phase 2+). Coordinates are normalized like `Geometry.crop`. */
-export type Mask =
-  | { type: 'linear'; x1: number; y1: number; x2: number; y2: number; invert?: boolean }
-  | { type: 'radial'; cx: number; cy: number; rx: number; ry: number; angle: number; feather: number; invert?: boolean }
-  | { type: 'brush'; strokes: { x: number; y: number; r: number; flow: number; erase?: boolean }[][]; invert?: boolean }
-  | { type: 'ai'; target: 'sky' | 'subject' | 'background' | 'person'; invert?: boolean }
-  | { type: 'range'; mode: 'luminance' | 'color'; low: number; high: number; smooth: number; hue?: number; invert?: boolean }
+/**
+ * Mask coordinates (Phase 2): positions are normalized to the SOURCE image as
+ * decoded and oriented (0…1 across its width / height), before the user's
+ * rotate, flip, straighten and crop — so a mask stays on the same part of the
+ * photo when the crop changes. Lengths (radii, brush sizes, feather widths) are
+ * fractions of the source's LONG edge, so circles stay round on any aspect.
+ * Convert to and from what's on screen with engine/geometry.ts.
+ */
+export type MaskShape =
+  /** Full effect on the (x1, y1) side, fading to none at (x2, y2). */
+  | { type: 'linear'; x1: number; y1: number; x2: number; y2: number }
+  /** Ellipse at (cx, cy), radii rx/ry, rotated `angle` degrees; feather 0…100 = soft edge width as % of the radius. */
+  | { type: 'radial'; cx: number; cy: number; rx: number; ry: number; angle: number; feather: number }
+  /** Painted strokes; r = brush radius, feather 0…100 = soft part of r (%), flow 0…1 per dab; `erase` strokes remove. */
+  | { type: 'brush'; strokes: { points: { x: number; y: number }[]; r: number; feather: number; flow: number; erase?: boolean }[] }
+  /** Phase 3 (on-device AI). Not rendered yet. */
+  | { type: 'ai'; target: 'sky' | 'subject' | 'background' | 'person' }
+  /**
+   * Select by brightness or color of the photo as developed before local layers.
+   * luminance: low/high 0…100 (display-encoded), smooth 0…100 = feathering of both ends.
+   * color: hue 0…360 and sat 0…100 of the sampled color, `low…high` = tolerance 0…100 (high used as the width), smooth 0…100.
+   */
+  | { type: 'range'; range: 'luminance' | 'color'; low: number; high: number; smooth: number; hue?: number; sat?: number }
 
-/** Local adjustment layer. Only the listed fields can be adjusted locally. */
+/** How a mask combines with the ones before it in the layer (the first one is always `add`). */
+export type MaskMode = 'add' | 'subtract' | 'intersect'
+
+export type Mask = MaskShape & { id: string; mode: MaskMode; invert: boolean }
+
+/** What a local layer can change. All optional; missing = no change. */
+export interface LocalAdjust {
+  /** Relative white balance, −100…+100 (+ = warmer / more magenta). */
+  temp?: number
+  tint?: number
+  /** Stops, −4…+4. */
+  exposure?: number
+  /** All below −100…+100 unless noted. */
+  contrast?: number
+  highlights?: number
+  shadows?: number
+  whites?: number
+  blacks?: number
+  texture?: number
+  clarity?: number
+  dehaze?: number
+  saturation?: number
+  /** Negative softens (skin), positive sharpens. */
+  sharpness?: number
+  /** Extra luminance noise reduction, 0…100. */
+  noise?: number
+  /** Tint the area with a color: hue 0…360, sat 0…100. */
+  color?: { hue: number; sat: number }
+}
+
+/** Local adjustment layer: its masks pick where, `adjust` says what. Layers apply in order. */
 export interface LocalLayer {
   id: string
   name: string
   enabled: boolean
-  /** 0…1. */
+  /** 0…1: scales the whole layer. */
   opacity: number
   masks: Mask[]
-  adjust: Partial<Basic> & { temp?: number; tint?: number }
+  adjust: LocalAdjust
+}
+
+/**
+ * Healing / clone spot (Phase 2). Same coordinate rules as masks. The circle at
+ * (x, y) with radius r is filled from the circle at (sx, sy). 'heal' also matches
+ * the brightness and color of the surroundings; 'clone' copies exactly.
+ */
+export interface RetouchSpot {
+  id: string
+  mode: 'heal' | 'clone'
+  x: number
+  y: number
+  r: number
+  sx: number
+  sy: number
+  /** 0…100: soft edge as % of r. */
+  feather: number
+  /** 0…1. */
+  opacity: number
 }
 
 export type Variation = 'original' | 'warmer' | 'cooler' | 'softer' | 'stronger'
@@ -193,6 +258,8 @@ export interface EditRecipe {
   detail: Detail
   effects: Effects
   geometry: Geometry
+  /** Healing / clone spots, applied first (to the photo itself). */
+  retouch: RetouchSpot[]
   layers: LocalLayer[]
   look?: AppliedLook
 }

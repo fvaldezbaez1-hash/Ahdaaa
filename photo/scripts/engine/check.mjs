@@ -35,7 +35,7 @@ const ok = (cond, label, detail) => console.log(`${cond ? 'PASS' : 'FAIL'} ${lab
 console.log('supported', await page.evaluate(() => window.lab.supported))
 const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-05.jpg', 'photo-21.jpg']
 for (const j of jpegList) await lab('loadJpeg', j, '/jpeg/' + j)
-const needRaw = want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
+const needRaw = want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
 if (needRaw) {
   console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW')))
   console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF')))
@@ -86,6 +86,49 @@ if (want('region')) {
   ok(r.maxDiff <= 2 && r.meanDiff < 0.6 && r.size[0] === r.export[0], '100 % view (renderRegion) == export pixels', r)
 }
 
+// Phase 2: five local layers of every mask kind, plus heal / clone spots.
+const mask = (id, m, mode = 'add', invert = false) => ({ id, mode, invert, ...m })
+const LAYERS = [
+  { id: 'sky', name: 'Darken sky', enabled: true, opacity: 1, adjust: { exposure: -1.2, highlights: -60, saturation: 20, temp: -15 },
+    masks: [mask('m1', { type: 'radial', cx: 0.85, cy: 0.06, rx: 0.32, ry: 0.2, angle: -12, feather: 70 })] },
+  { id: 'dodge', name: 'Dodge bridge', enabled: true, opacity: 1, adjust: { exposure: 0.8, shadows: 40, clarity: 30 },
+    masks: [mask('b1', { type: 'brush', strokes: [
+      { points: [0.2, 0.25, 0.3, 0.35, 0.42, 0.5, 0.6].map((x) => ({ x, y: 0.62 - 0.55 * (x - 0.2) * (0.62 - x) * 2.2 })), r: 0.025, feather: 60, flow: 0.8 },
+      { points: [{ x: 0.445, y: 0.54 }, { x: 0.445, y: 0.6 }], r: 0.012, feather: 20, flow: 1, erase: true },
+    ] })] },
+  { id: 'low', name: 'Lift dark water', enabled: true, opacity: 0.8, adjust: { shadows: 50, color: { hue: 30, sat: 30 }, whites: 10, blacks: -10 },
+    masks: [mask('r1', { type: 'range', range: 'luminance', low: 0, high: 30, smooth: 40 }), mask('l1', { type: 'linear', x1: 0.5, y1: 1, x2: 0.5, y2: 0.6 }, 'intersect')] },
+  { id: 'green', name: 'Calm greens', enabled: true, opacity: 1, adjust: { saturation: -35, temp: 20, tint: -10 },
+    masks: [mask('c1', { type: 'range', range: 'color', hue: 90, sat: 60, low: 0, high: 35, smooth: 30 })] },
+  { id: 'soft', name: 'Soften edges', enabled: true, opacity: 1, adjust: { sharpness: -60, noise: 50, contrast: -30, texture: -40, dehaze: 20 },
+    masks: [mask('s1', { type: 'radial', cx: 0.5, cy: 0.5, rx: 0.45, ry: 0.32, angle: 0, feather: 60 }, 'add', true)] },
+]
+const SPOTS = [
+  { id: 'h1', mode: 'heal', x: 0.414, y: 0.714, r: 0.013, sx: 0.37, sy: 0.74, feather: 30, opacity: 1 },
+  // A clone from far away: in the tiled export the source lies in another tile.
+  { id: 'c1', mode: 'clone', x: 0.12, y: 0.2, r: 0.02, sx: 0.8, sy: 0.85, feather: 30, opacity: 1 },
+]
+const LOCAL = { layers: LAYERS, retouch: SPOTS }
+
+if (want('local')) {
+  const a = await lab('canvasParity', 'arw', LOCAL)
+  ok(a.maxDiff <= 2, 'masks + spots: interactive canvas (1:1) == export', a)
+  const b = await lab('regionCheck', 'arw', LOCAL, 1500, 1500)
+  ok(b.maxDiff <= 2 && b.meanDiff < 0.6, 'masks + spots: 100 % view == export', b)
+  const c = await lab('tiling', 'arw', LOCAL)
+  ok(c.maxDiff16 <= 320 && c.meanDiff16 < 0.5, 'masks + spots: tiled export == single tile (16-bit)', c)
+  const d = await lab('developedSample', 'arw', { layers: LAYERS }, 0.3, 0.6)
+  ok(d.maxDiff < 4 / 255, 'samplePixel developed = the photo without its layers (range eyedropper)', d)
+  const h = await lab('healCheck', 'arw', 0.414, 0.714, 0.013)
+  save('heal-duck', h.png)
+  // The feature's texture is gone (spread back to water level) and the brightness matches the surroundings.
+  ok(h.after.std < h.before.std * 0.5 && Math.abs(h.after.inside - h.after.ring) < 8, 'heal spot removes a small feature', { ...h, png: undefined })
+  const t = await lab('timing', 'arw', 1600, 1000, LOCAL)
+  console.log('timing with 5 layers + 2 spots (SwiftShader, 1600×1000)', JSON.stringify(t))
+}
+
+if (want('previews')) console.log('look previews (SwiftShader)', JSON.stringify(await lab('previewTiming', 'arw', 12)))
+
 if (want('context')) {
   const r = await lab('contextLoss', 'photo-21.jpg')
   ok(r.hasSource && r.center[3] === 255 && r.center[0] > 0, 'context lost → restored → renders again', r)
@@ -104,7 +147,7 @@ if (want('renders') || want('look')) {
     save(file, r.png)
     console.log('render', file, JSON.stringify({ ...r, png: undefined }))
   }
-  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full'].includes(a))
+  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews'].includes(a))
   const R0 = R
   R = async (file, ...rest) => (only.length === 0 || only.some((o) => file.includes(o))) && R0(file, ...rest)
   await R('arw-default', 'arw', {})
@@ -123,6 +166,9 @@ if (want('renders') || want('look')) {
   await R('arw-wb-3200', 'arw', { wb: { preset: 'custom', temp: 3200, tint: 0 } })
   await R('arw-vivid', 'arw', { profile: 'vivid' })
   await R('arw-exp-2', 'arw', { basic: { exposure: -2 } })
+  await R('arw-local-5-layers', 'arw', LOCAL)
+  await R('arw-sky-dodge', 'arw', { layers: LAYERS.slice(0, 2) })
+  save('canvas-overlay', await lab('canvasShot', 'arw', LOCAL, { maskOverlay: 'dodge' }, 1200, 800))
   await R('jpg-21-default', 'photo-21.jpg', {})
   await R('jpg-21-edit', 'photo-21.jpg', { basic: { highlights: -60, shadows: 50, clarity: 30, vibrance: 30 } })
   await R('jpg-03-warm-curve', 'photo-03.jpg', { wb: { preset: 'custom', temp: 25, tint: 5 }, curve: { rgb: [{ x: 0, y: 0.05 }, { x: 0.25, y: 0.2 }, { x: 0.75, y: 0.82 }, { x: 1, y: 1 }], r: [{ x: 0, y: 0 }, { x: 1, y: 1 }], g: [{ x: 0, y: 0 }, { x: 1, y: 1 }], b: [{ x: 0, y: 0 }, { x: 1, y: 1 }] } })

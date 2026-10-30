@@ -1,6 +1,7 @@
-// Global tone: one curve built on the CPU into a lookup table the GPU applies
-// with Adobe's hue-preserving RGB method (curve the max and min channels,
-// interpolate the middle one).
+// Global tone, applied on the GPU with Adobe's hue-preserving RGB method (curve
+// the max and min channels, interpolate the middle one). The RAW base curve is a
+// lookup table; contrast, whites and blacks are evaluated per pixel so local
+// layers can add to them.
 //
 // Scene-referred input (linear, 0.18 = middle gray, may exceed 1) goes through
 // the base curve — RAW: filmic with a soft shoulder; display sources: identity,
@@ -90,10 +91,13 @@ export interface ToneSpec {
   blacks: number
 }
 
-export function toneIsIdentity(s: ToneSpec): boolean {
-  return s.kind === 'display' && s.xmax <= 1 && s.contrast === 0 && s.whites === 0 && s.blacks === 0
+/** Exponent that moves the contrast pivot (middle gray through the base curve, perceptual) to 0.5. */
+export function contrastExponent(kind: 'raw' | 'display', f: Filmic): number {
+  const base = kind === 'raw' ? filmic(MID_GRAY, f) : MID_GRAY
+  return Math.log(0.5) / Math.log(base ** (1 / GAMMA))
 }
 
+/** Reference implementation of the whole global curve (the shader evaluates the same steps). */
 export function toneCurve(s: ToneSpec): (x: number) => number {
   const base = s.kind === 'raw' ? (x: number) => filmic(x, s.filmic) : (x: number) => displayShoulder(x, s.xmax)
   const pivot = base(MID_GRAY) ** (1 / GAMMA)
@@ -111,10 +115,10 @@ export const LUT_SIZE = 2048
 export const LUT_LOG_MIN = -22
 export const LUT_LOG_MAX = 8
 
-export function buildToneLut(s: ToneSpec): Float32Array {
-  const f = toneCurve(s)
+/** RAW base curve as a LUT the shader reads; contrast, whites and blacks are evaluated per pixel. */
+export function buildFilmicLut(f: Filmic): Float32Array {
   const lut = new Float32Array(LUT_SIZE)
-  for (let i = 0; i < LUT_SIZE; i++) lut[i] = f(2 ** (LUT_LOG_MIN + ((LUT_LOG_MAX - LUT_LOG_MIN) * i) / (LUT_SIZE - 1)))
+  for (let i = 0; i < LUT_SIZE; i++) lut[i] = filmic(2 ** (LUT_LOG_MIN + ((LUT_LOG_MAX - LUT_LOG_MIN) * i) / (LUT_SIZE - 1)), f)
   return lut
 }
 

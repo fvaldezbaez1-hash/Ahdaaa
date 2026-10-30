@@ -7,6 +7,10 @@ import { Icon, type IconName } from '../../ui/Icon'
 import { toast } from '../../ui/toast'
 import { enterCrop, finishCrop } from '../crop/cropTool'
 import { CropActions, CropPanel } from '../crop/CropPanel'
+import { HealPanel } from '../masks/HealPanel'
+import { ToolIcon } from '../masks/icons'
+import { MasksPanel } from '../masks/MasksPanel'
+import { enterHeal, enterMasks, exitTool } from '../masks/modes'
 import { applyAuto } from '../panels/actions'
 import { ColorGrading } from '../panels/ColorGrading'
 import { ColorMixer } from '../panels/ColorMixer'
@@ -20,12 +24,12 @@ import { useSession } from '../session'
 import { Stage } from '../stage/Stage'
 import { useView, view } from '../view'
 
-type ToolId = 'presets' | 'light' | 'color' | 'effects' | 'detail' | 'curve' | 'grading' | 'crop'
+type ToolId = 'presets' | 'light' | 'color' | 'effects' | 'detail' | 'curve' | 'grading' | 'masks' | 'heal' | 'crop'
 
 interface Tool {
   id: ToolId
   label: string
-  icon: IconName
+  icon: IconName | 'heal'
   title: string
   hint?: string
   parts?: PartId[]
@@ -70,6 +74,8 @@ const TOOLS: Tool[] = [
   { id: 'detail', label: 'Detail', icon: 'detail', title: 'Detail', hint: 'Sharpening and noise', parts: ['detail'], body: () => <DetailSliders /> },
   { id: 'curve', label: 'Curve', icon: 'curve', title: 'Tone curve', hint: 'Tap to add a point, drag off to remove', parts: ['curve'], body: () => <ToneCurve /> },
   { id: 'grading', label: 'Grading', icon: 'grading', title: 'Color grading', hint: 'Drag the wheel to tint', parts: ['grading'], body: () => <ColorGrading layout="single" /> },
+  { id: 'masks', label: 'Masks', icon: 'mask', title: 'Masks', hint: 'Adjust part of the photo', body: () => <MasksPanel layout="strip" /> },
+  { id: 'heal', label: 'Heal', icon: 'heal', title: 'Heal & clone', body: () => <HealPanel layout="strip" /> },
   { id: 'crop', label: 'Crop', icon: 'crop', title: 'Crop & straighten', body: () => <CropPanel layout="strip" /> },
 ]
 
@@ -97,6 +103,9 @@ export function PhoneEditor() {
   const pick = (id: ToolId) => {
     if (cropping && id !== 'crop') finishCrop()
     if (id === 'crop' && !cropping) enterCrop({ w: record.width, h: record.height })
+    if (id === 'masks') enterMasks()
+    else if (id === 'heal') enterHeal()
+    else if (id !== 'crop') exitTool()
     setToolId(id)
   }
   const auto = () => {
@@ -134,7 +143,7 @@ export function PhoneEditor() {
           {cropping ? <CropActions /> : tool.parts ? <PanelReset parts={tool.parts} title={tool.title} /> : null}
           {!cropping && tool.hint && !tool.parts && <span className="muted small">{tool.hint}</span>}
         </div>
-        <div className={tool.id === 'presets' ? 'ed-phone-panel-body flush' : 'ed-phone-panel-body scroll'}>
+        <div key={tool.id} className={tool.id === 'presets' ? 'ed-phone-panel-body flush' : 'ed-phone-panel-body scroll'}>
           {tool.parts && tool.hint && <p className="muted small ed-phone-hint">{tool.hint}</p>}
           {tool.body()}
         </div>
@@ -169,7 +178,7 @@ export function PhoneEditor() {
 function ToolButton({ tool, on, onClick }: { tool: Tool; on: boolean; onClick: () => void }) {
   return (
     <button type="button" className={on ? 'ed-tool on' : 'ed-tool'} aria-pressed={on} onClick={onClick}>
-      <Icon name={tool.icon} size={24} />
+      {tool.icon === 'heal' ? <ToolIcon name="heal" size={24} /> : <Icon name={tool.icon} size={24} />}
       {tool.label}
     </button>
   )

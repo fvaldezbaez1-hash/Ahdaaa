@@ -1,5 +1,5 @@
 import { IDENTITY_CURVE } from '../color/curve'
-import { BANDS, type Band, type BandValues, type Basic, type Detail, type EditRecipe, type Effects, type Grading, type SourceKind, type Wheel } from './types'
+import { BANDS, type Band, type BandValues, type Basic, type Detail, type EditRecipe, type Effects, type Grading, type LocalAdjust, type SourceKind, type Wheel } from './types'
 
 export const zeroBands = (): BandValues => Object.fromEntries(BANDS.map((b) => [b, 0])) as Record<Band, number>
 const wheel = (): Wheel => ({ hue: 0, sat: 0, lum: 0 })
@@ -34,6 +34,7 @@ export function defaultRecipe(kind: SourceKind, asShot?: { temp: number; tint: n
     detail: kind === 'raw' ? { ...DEFAULT_DETAIL } : { ...DEFAULT_DETAIL_DISPLAY },
     effects: { ...DEFAULT_EFFECTS },
     geometry: { crop: { x: 0, y: 0, w: 1, h: 1 }, angle: 0, rotate: 0, flipH: false, flipV: false, aspect: 'original' },
+    retouch: [],
     layers: [],
   }
 }
@@ -66,6 +67,7 @@ export function normalizeRecipe(r: Partial<EditRecipe> | undefined, kind: Source
     detail: { ...d.detail, ...r.detail },
     effects: { ...d.effects, ...r.effects },
     geometry: { ...d.geometry, ...r.geometry, crop: { ...d.geometry.crop, ...r.geometry?.crop } },
+    retouch: r.retouch ?? [],
     layers: r.layers ?? [],
   }
 }
@@ -120,6 +122,24 @@ export const SPECS: Record<string, SliderSpec> = {
   'grading.blending': { min: 0, max: 100, step: 1 },
   'grading.balance': { min: -100, max: 100, step: 1 },
   'geometry.angle': { min: -45, max: 45, step: 0.1, dp: 1, unit: '°' },
+}
+
+/** Ranges of the local (masked) adjustments; every one defaults to 0 = no change. */
+export const LOCAL_SPECS: Record<Exclude<keyof LocalAdjust, 'color'>, SliderSpec> = {
+  temp: { min: -100, max: 100, step: 1 },
+  tint: { min: -100, max: 100, step: 1 },
+  exposure: { min: -4, max: 4, step: 0.01, dp: 2 },
+  contrast: { min: -100, max: 100, step: 1 },
+  highlights: { min: -100, max: 100, step: 1 },
+  shadows: { min: -100, max: 100, step: 1 },
+  whites: { min: -100, max: 100, step: 1 },
+  blacks: { min: -100, max: 100, step: 1 },
+  texture: { min: -100, max: 100, step: 1 },
+  clarity: { min: -100, max: 100, step: 1 },
+  dehaze: { min: -100, max: 100, step: 1 },
+  saturation: { min: -100, max: 100, step: 1 },
+  sharpness: { min: -100, max: 100, step: 1 },
+  noise: { min: 0, max: 100, step: 1 },
 }
 
 /** Temperature slider for RAW moves evenly in mireds; these map slider position ↔ Kelvin. */

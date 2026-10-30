@@ -8,7 +8,9 @@ import { frameSize, mapBounds, outputSize, outputToSource } from './geometry'
 import type { Gpu } from './gl'
 import { areaDownscale, atmosphericLight, boxReduce, lowResSize } from './image'
 import { frameParams, toWorkingSpace } from './params'
-import { computeGuide, Luts, marginFor, renderFrame, scaleSource, StageCache } from './pipeline'
+import { retouchWindow } from './heal'
+import { computeGuide, Luts, marginFor, needsHaze, renderFrame, scaleSource, StageCache } from './pipeline'
+import { applySpots } from './retouch'
 import type { ExportRenderOptions, RenderedImage, SourceColor, SourceImage } from './types'
 
 const abortError = () => new DOMException('Export cancelled', 'AbortError')
@@ -28,7 +30,8 @@ export async function renderTiled(gpu: Gpu, recipe: EditRecipe, source: SourceIm
   const low = areaDownscale(source, lowSize.width, lowSize.height)
   const lowTex = gpu.uploadFloat(low.data, low.width, low.height, 3)
   const air = toWorkingSpace(params.input, atmosphericLight(low))
-  const guide = computeGuide(gpu, lowTex, params.input, air, params.dehaze !== 0, 'export')
+  const guide = computeGuide(gpu, lowTex, params.input, air, needsHaze(params), 'export')
+  const spots = recipe.retouch ?? []
 
   // Big reductions: exact k×k box average on the CPU first, Mitchell for the remaining factor.
   const k = s <= 0.5 ? Math.floor(1 / s) : 1
@@ -53,7 +56,8 @@ export async function renderTiled(gpu: Gpu, recipe: EditRecipe, source: SourceIm
       for (let tx = 0; tx < cols; tx++) {
         const inner = { x: tx * T, y: ty * T, w: Math.min(T, out.width - tx * T), h: Math.min(T, out.height - ty * T) }
         const region = { x: inner.x - M, y: inner.y - M, w: inner.w + 2 * M, h: inner.h + 2 * M }
-        const b = mapBounds(toSource, region.x, region.y, region.x + region.w, region.y + region.h)
+        // The source window also holds whatever the spots inside it copy from.
+        const b = retouchWindow(spots, full.width, full.height, mapBounds(toSource, region.x, region.y, region.x + region.w, region.y + region.h))
         const pad = 2 / ratio + 3
         const ix0 = Math.min(reduced.width - 1, Math.max(0, Math.floor(b.x0 / k - pad)))
         const iy0 = Math.min(reduced.height - 1, Math.max(0, Math.floor(b.y0 / k - pad)))
@@ -62,8 +66,10 @@ export async function renderTiled(gpu: Gpu, recipe: EditRecipe, source: SourceIm
         const int = gpu.uploadRgb16(reduced.data, reduced.width, ix0, iy0, ix1 - ix0, iy1 - iy0)
         const sx0 = Math.max(Math.floor(ix0 * ratio), Math.floor(b.x0 * s) - 3), sy0 = Math.max(Math.floor(iy0 * ratio), Math.floor(b.y0 * s) - 3)
         const sx1 = Math.min(Math.ceil(ix1 * ratio), Math.ceil(b.x1 * s) + 3), sy1 = Math.min(Math.ceil(iy1 * ratio), Math.ceil(b.y1 * s) + 3)
-        const scaled = scaleSource(gpu, int, ix0, iy0, k, ratio, { x: sx0, y: sy0, w: Math.max(1, sx1 - sx0), h: Math.max(1, sy1 - sy0) })
+        const plain = scaleSource(gpu, int, ix0, iy0, k, ratio, { x: sx0, y: sy0, w: Math.max(1, sx1 - sx0), h: Math.max(1, sy1 - sy0) })
         gpu.destroy(int)
+        const scaled = spots.length ? applySpots(gpu, plain, spots, full) : plain
+        if (scaled !== plain) gpu.free(plain.tex)
 
         const target = gpu.target(inner.w, inner.h, bits === 8 ? 'rgba8' : 'rgba32f')
         renderFrame(gpu, cache, luts, {

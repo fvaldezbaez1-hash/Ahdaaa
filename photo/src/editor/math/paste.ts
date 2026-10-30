@@ -8,7 +8,7 @@ import type { PhotoRecord } from '../../io/types'
 // parts (top-level recipe keys), except Light and Presence, which split
 // `basic` so either can be pasted alone.
 
-export type PasteGroup = 'look' | 'wb' | 'light' | 'presence' | 'curve' | 'mixer' | 'grading' | 'detail' | 'effects' | 'crop'
+export type PasteGroup = 'look' | 'wb' | 'light' | 'presence' | 'curve' | 'mixer' | 'grading' | 'detail' | 'effects' | 'masks' | 'retouch' | 'crop'
 
 export const PASTE_GROUPS: { id: PasteGroup; label: string }[] = [
   { id: 'look', label: 'Profile & treatment' },
@@ -20,6 +20,8 @@ export const PASTE_GROUPS: { id: PasteGroup; label: string }[] = [
   { id: 'grading', label: 'Color grading' },
   { id: 'detail', label: 'Detail' },
   { id: 'effects', label: 'Effects' },
+  { id: 'masks', label: 'Masks' },
+  { id: 'retouch', label: 'Healing spots' },
   { id: 'crop', label: 'Crop & rotation' },
 ]
 
@@ -34,6 +36,8 @@ const DIRECT: Partial<Record<PasteGroup, RecipePart[]>> = {
   grading: ['grading'],
   detail: ['detail'],
   effects: ['effects'],
+  masks: ['layers'],
+  retouch: ['retouch'],
   crop: ['geometry'],
 }
 

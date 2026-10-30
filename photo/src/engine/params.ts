@@ -2,10 +2,10 @@
 // it is unit-tested and shared by the interactive view and the export.
 
 import { curveLut, isIdentity } from '../color/curve'
-import { apply, IDENTITY, mul, OKLAB_M2, REC2020_TO_LMS, SRGB_TO_REC2020, type Mat3, type Vec3 } from '../color/matrices'
+import { apply, IDENTITY, mul, OKLAB_M2, REC2020_TO_LMS, REC2020_TO_SRGB, SRGB_TO_REC2020, type Mat3, type Vec3 } from '../color/matrices'
 import { rawWbRatio, relativeWbMatrix } from '../color/wb'
-import { BAND_HUES, BANDS, type BandValues, type Detail, type EditRecipe, type Effects, type ProfileId, type Wheel } from '../edit/types'
-import { buildToneLut, FILMIC, toneIsIdentity, type Filmic, type ToneSpec } from './tone'
+import { BAND_HUES, BANDS, type BandValues, type Detail, type EditRecipe, type Effects, type LocalLayer, type ProfileId, type Wheel } from '../edit/types'
+import { buildFilmicLut, contrastExponent, FILMIC, type Filmic } from './tone'
 import type { SourceColor } from './types'
 
 /** Base rendering of a profile. For display sources only the relative tweaks apply ('color' = untouched). */
@@ -67,6 +67,19 @@ function lumaIn(m: Mat3): Vec3 {
 export function toWorkingSpace(t: InputTransform, v: Vec3): Vec3 {
   return apply(t.toWorking, apply(t.pre, [v[0] * t.wbMul[0], v[1] * t.wbMul[1], v[2] * t.wbMul[2]]))
 }
+
+/**
+ * Local temperature / tint: log2 von Kries gains in OKLab's LMS for a full (±100) slider,
+ * from the same relative white balance as the global JPEG sliders (the shader scales them
+ * linearly — white balance is close to linear in mireds).
+ */
+function lmsLogGains(temp: number, tint: number): Vec3 {
+  const m = mul(SRGB_TO_REC2020, mul(relativeWbMatrix(temp, tint), REC2020_TO_SRGB))
+  const a = apply(REC2020_TO_LMS, apply(m, [1, 1, 1])), b = apply(REC2020_TO_LMS, [1, 1, 1])
+  return [Math.log2(a[0] / b[0]), Math.log2(a[1] / b[1]), Math.log2(a[2] / b[2])]
+}
+export const WB_TEMP = lmsLogGains(100, 0)
+export const WB_TINT = lmsLogGains(0, 100)
 
 export const HUE_LUT_SIZE = 360
 
@@ -150,8 +163,14 @@ export interface FrameParams {
   clarity: number
   texture: number
   dehaze: number
-  toneIdentity: boolean
+  /** RAW base curve LUT (display sources use an analytic highlight shoulder instead). */
   toneLut: Float32Array
+  /** −1…1, incl. the profile's offsets. */
+  contrast: number
+  whites: number
+  blacks: number
+  /** See contrastExponent. */
+  contrastExp: number
   saturation: number
   vibrance: number
   bw: boolean
@@ -162,6 +181,8 @@ export interface FrameParams {
   curveLut: Float32Array | null
   detail: Detail
   effects: Effects
+  /** The recipe's local layers (the pipeline renders the active ones). */
+  layers: LocalLayer[]
   /** Cache keys: equal key ⇒ equal data. */
   keys: { input: string; tone: string; hue: string; curve: string }
 }
@@ -173,16 +194,9 @@ export function frameParams(r: EditRecipe, color: SourceColor): FrameParams {
   const kind = color.space === 'camera' ? 'raw' : 'display'
   const p = PROFILES[r.profile] ?? PROFILES.color
   const b = r.basic
-  const spec: ToneSpec = {
-    kind,
-    filmic: { ...FILMIC, ...p.filmic },
-    xmax: Math.max(1, 2 ** b.exposure),
-    contrast: clamp1(b.contrast / 100 + (p.contrast ?? 0)),
-    whites: clamp1(b.whites / 100),
-    blacks: clamp1(b.blacks / 100 + (p.blacks ?? 0)),
-  }
-  const toneKey = JSON.stringify(spec)
-  if (lutCache?.key !== toneKey) lutCache = { key: toneKey, lut: buildToneLut(spec) }
+  const fm: Filmic = { ...FILMIC, ...p.filmic }
+  const toneKey = JSON.stringify(fm)
+  if (lutCache?.key !== toneKey) lutCache = { key: toneKey, lut: buildFilmicLut(fm) }
 
   const m = r.mixer
   const add = (v: BandValues, o?: Partial<BandValues>) => (o ? Object.fromEntries(BANDS.map((k) => [k, v[k] + (o[k] ?? 0)])) as BandValues : v)
@@ -206,8 +220,11 @@ export function frameParams(r: EditRecipe, color: SourceColor): FrameParams {
     clarity: clamp1(b.clarity / 100),
     texture: clamp1(b.texture / 100),
     dehaze: clamp1(b.dehaze / 100),
-    toneIdentity: toneIsIdentity(spec),
     toneLut: lutCache.lut,
+    contrast: clamp1(b.contrast / 100 + (p.contrast ?? 0)),
+    whites: clamp1(b.whites / 100),
+    blacks: clamp1(b.blacks / 100 + (p.blacks ?? 0)),
+    contrastExp: contrastExponent(kind, fm),
     saturation: clamp1(b.saturation / 100 + (p.saturation ?? 0)),
     vibrance: clamp1(b.vibrance / 100 + (p.vibrance ?? 0) + (kind === 'raw' ? RAW_VIBRANCE : 0)),
     bw,
@@ -223,6 +240,7 @@ export function frameParams(r: EditRecipe, color: SourceColor): FrameParams {
     curveLut: buildCurveLut(r.curve),
     detail: r.detail,
     effects: r.effects,
+    layers: r.layers ?? [],
     keys: {
       input: JSON.stringify([input.wbMul, input.pre, kind]),
       tone: toneKey,

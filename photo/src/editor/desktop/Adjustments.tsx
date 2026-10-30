@@ -1,5 +1,7 @@
 import { useEditor } from '../../state/editor'
 import { CropActions, CropPanel } from '../crop/CropPanel'
+import { HealPanel } from '../masks/HealPanel'
+import { MasksPanel, MasksSummary } from '../masks/MasksPanel'
 import { ColorGrading } from '../panels/ColorGrading'
 import { ColorMixer } from '../panels/ColorMixer'
 import { Histogram } from '../panels/Histogram'
@@ -26,16 +28,21 @@ function Info() {
 
 /** The right column: histogram, profile and every adjustment group. */
 export function Adjustments() {
-  const cropping = useView((s) => s.tool === 'crop')
+  const tool = useView((s) => s.tool)
+  const cropping = tool === 'crop'
   const bw = useEditor((s) => s.recipe?.treatment === 'bw')
   return (
     <aside className="ed-right scroll" aria-label="Adjustments">
       <div className="ed-top">
         <Histogram />
         <Info />
-        {!cropping && <ProfileRow />}
+        {!tool && <ProfileRow />}
       </div>
-      {cropping ? (
+      {tool === 'mask' ? (
+        <MasksPanel layout="side" />
+      ) : tool === 'heal' ? (
+        <HealPanel layout="side" />
+      ) : cropping ? (
         <section className="ed-crop-side" aria-label="Crop and straighten">
           <div className="row between">
             <h2>Crop & straighten</h2>
@@ -69,15 +76,7 @@ export function Adjustments() {
           <Section id="effects" title="Effects" parts={['effects']}>
             <EffectsSliders />
           </Section>
-          <section className="ed-masks" aria-labelledby="ed-masks-title">
-            <h2 id="ed-masks-title">Masks</h2>
-            <div className="ed-masks-grid" aria-hidden="true">
-              {['Sky · AI', 'Subject · AI', 'Brush', 'Gradient'].map((m) => (
-                <span key={m}>{m}</span>
-              ))}
-            </div>
-            <p className="muted small">Brush, gradient and AI masks are coming in the next update.</p>
-          </section>
+          <MasksSummary />
         </>
       )}
     </aside>
