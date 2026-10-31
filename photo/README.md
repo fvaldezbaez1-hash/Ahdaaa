@@ -59,6 +59,23 @@ Once it's installed, Lumen works offline.
 - Masks stay on the same part of the photo when you change the crop, and look
   the same on screen, at 100 % and in the export.
 
+**AI, on your device**
+- **AI masks:** Subject, Sky, Background, People (face, body skin, hair,
+  clothes, accessories) and Select object (click what you want; Alt-click to
+  leave something out). Each becomes a mask you can combine and adjust.
+- **Remove (⇧Q):** paint over something and let go; it's filled in to match
+  its surroundings.
+- **AI Denoise** (Detail panel) cleans high-ISO noise on the full photo, then
+  an Amount slider blends it.
+- **Upscale 2× (AI)** on export doubles width and height.
+- Nothing is uploaded. Each model downloads once from the Lumen site itself,
+  the first time you use it (you're asked first, and told the size), then works
+  offline. Settings → AI models lists them and frees the space.
+- Models (all licensed for any use): MediaPipe selfie / hair segmenters and
+  Magic Touch (Google, Apache-2.0), U²-Net and IS-Net (Apache-2.0), Depth
+  Anything V2 Small (Apache-2.0), MI-GAN (MIT), SCUNet (Apache-2.0) and
+  Real-ESRGAN (BSD-3-Clause).
+
 **Presets**
 - 100 hand-made looks in 20 collections, such as Film, Portrait, Landscape,
   Black & White, Cinematic, Moody and Wedding.
@@ -73,9 +90,9 @@ Once it's installed, Lumen works offline.
 - Resize on export. It renders in tiles, so full-size exports work even on phones.
 - Save to Files or Downloads, or share straight to other apps.
 
-**Coming next:** AI masks that select the subject, sky or people for you, AI
-noise reduction and object removal, all running on your device. A built-in AI
-editing assistant (your own OpenAI, Google or Anthropic key) is partly built.
+**Coming next:** a Capture One–style color editor, lens corrections and
+perspective fixes. A built-in AI editing assistant (your own OpenAI, Google or
+Anthropic key) is partly built.
 
 ## Good to know
 
@@ -88,6 +105,11 @@ editing assistant (your own OpenAI, Google or Anthropic key) is partly built.
   storage for sites you haven't opened in a while, unless Lumen is added to
   the home screen.
 - Lumen needs WebGL2, which every current browser has.
+- **AI speed:** masks and Remove take seconds on a computer. AI Denoise and
+  Upscale need GPU acceleration for AI (WebGPU, in recent Chrome, Edge and
+  Safari); without it Lumen tells you how long it would take and doesn't start
+  jobs longer than 30 minutes. On phones, AI is slower and the large models may
+  not fit in memory.
 
 ## For developers
 
@@ -121,6 +143,7 @@ Code map:
 | `src/library/` | Library grid, albums, import and export sheets |
 | `src/editor/` | Editor screen: panels, stage, crop tool, masks and heal/clone tools, desktop and phone layouts, shortcuts |
 | `src/presets/` | The 100 looks, how they apply, the presets panel and screen, Lightroom `.xmp` |
+| `src/ai/` | On-device AI: model registry and downloads, ONNX Runtime and MediaPipe in a worker, segmentation, object selection, inpainting, denoise, upscale |
 | `src/assistant/` | AI assistant (in progress) |
 | `src/settings/`, `src/state/`, `src/ui/` | Settings, shared state, shared components |
 
