@@ -162,4 +162,16 @@ export function estimate(s: AiSupport | null, task: AiTask, megapixels: number):
   return `about ${Math.round(secs / 60)} min`
 }
 
+/** The longest AI job Lumen offers to start: beyond it the device effectively lacks GPU acceleration for AI. */
+const MAX_JOB_SECONDS = 30 * 60
+
+/** Why a full-photo AI job isn't offered on this device (it would take longer than MAX_JOB_SECONDS), or null. */
+export function tooSlow(s: AiSupport | null, task: AiTask, megapixels: number): string | null {
+  const per = s?.secondsPerMp?.[task]
+  if (!per || per * megapixels <= MAX_JOB_SECONDS) return null
+  const mins = (per * megapixels) / 60
+  const time = mins < 90 ? `about ${Math.round(mins / 10) * 10} min` : `about ${Math.round(mins / 60)} hours`
+  return `This would take ${time} here. It needs GPU acceleration for AI (WebGPU), as in a recent Chrome, Edge or Safari on a computer.`
+}
+
 export const formatBytes = (b: number) => (b >= 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b >= 1e6 ? `${(b / 1e6).toFixed(b >= 1e8 ? 0 : 1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`)

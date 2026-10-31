@@ -156,3 +156,18 @@ describe('AI jobs', () => {
     expect([...(await rastersFor(r)).keys()]).toEqual([id])
   })
 })
+
+describe('jobs out of reach', () => {
+  it('turns off full-photo jobs estimated beyond 30 minutes, with the reason', async () => {
+    const { tooSlow } = await import('./jobs')
+    const wasm = { available: true, backend: 'wasm' as const, secondsPerMp: { denoise: 400, upscale: 265 } }
+    const gpu = { available: true, backend: 'webgpu' as const, secondsPerMp: { denoise: 27, upscale: 18 } }
+    expect(tooSlow(wasm, 'denoise', 24)).toMatch(/about 3 hours.*WebGPU/)
+    expect(tooSlow(wasm, 'upscale', 7)).toMatch(/about 30 min/)
+    expect(tooSlow(wasm, 'upscale', 6)).toBeNull()
+    expect(tooSlow(wasm, 'denoise', 2)).toBeNull()
+    expect(tooSlow(gpu, 'denoise', 24)).toBeNull()
+    expect(tooSlow(null, 'denoise', 24)).toBeNull()
+    expect(tooSlow({ available: true }, 'denoise', 24)).toBeNull()
+  })
+})

@@ -5,7 +5,7 @@ import { Slider } from '../../ui/Slider'
 import { useSession } from '../session'
 import { DENOISE_DEFAULT, removeDenoise, runDenoise } from './actions'
 import { AiJobCard } from './AiJobCard'
-import { estimate, useAiJob, useAiSupport } from './jobs'
+import { estimate, tooSlow, useAiJob, useAiSupport } from './jobs'
 import { useMissingRasters } from './rasterSync'
 import { needsCompute } from './refs'
 
@@ -20,6 +20,7 @@ export function AiDenoise() {
   const busy = !!job && job.phase !== 'error'
   const mp = (session.record.width * session.record.height) / 1e6
   const time = estimate(support, 'denoise', mp)
+  const slow = tooSlow(support, 'denoise', mp)
 
   if (!dn)
     return (
@@ -27,14 +28,16 @@ export function AiDenoise() {
         <AiJobCard scope="denoise" />
         {job?.scope !== 'denoise' && (
           <>
-            <button type="button" className="btn outline sm ed-denoise-btn" disabled={busy || !support?.available} onClick={() => void runDenoise(session)}>
+            <button type="button" className="btn outline sm ed-denoise-btn" disabled={busy || !support?.available || !!slow} onClick={() => void runDenoise(session)}>
               <Icon name="sparkle" size={15} className="accent" />
               AI Denoise
             </button>
             <p className="muted small">
               {support && !support.available
                 ? (support.reason ?? 'On-device AI isn’t available on this device.')
-                : `Cleans up noise with an on-device model, on the full ${Math.round(mp)} MP photo${time ? `: ${time} on this device` : ''}.${phone ? ' Slow on phones; keep Lumen open while it works.' : ''}`}
+                : slow
+                  ? slow
+                  : `Cleans up noise with an on-device model, on the full ${Math.round(mp)} MP photo${time ? `: ${time} on this device` : ''}.${phone ? ' Slow on phones; keep Lumen open while it works.' : ''}`}
             </p>
           </>
         )}

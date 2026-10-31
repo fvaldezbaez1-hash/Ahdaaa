@@ -3,7 +3,7 @@ import type { ExportOptions } from '../../io/types'
 import { Toggle } from '../../ui/controls'
 import { useIsPhone } from '../../ui/hooks'
 import { ai, type AiModel } from './core'
-import { formatBytes, useAiSupport } from './jobs'
+import { formatBytes, tooSlow, useAiSupport } from './jobs'
 import { upscaledSize } from './sizes'
 
 type ModelState = { kind: 'checking' } | { kind: 'ready' } | { kind: 'needed'; models: AiModel[] } | { kind: 'downloading'; fraction: number } | { kind: 'failed'; message: string }
@@ -49,9 +49,17 @@ export function UpscaleField({ value, onChange, fullSize }: { value: ExportOptio
   }
 
   const out = fullSize && on ? upscaledSize(fullSize, value.longEdge) : null
+  // The model runs on the photo at half the output size.
+  const inMp = fullSize ? ((fullSize.width * fullSize.height) / 1e6) * Math.min(1, value.longEdge ? (value.longEdge / 2 / Math.max(fullSize.width, fullSize.height)) ** 2 : 1) : 0
+  const slow = tooSlow(support, 'upscale', inMp)
+  // Don't leave a remembered "on" in place where the job is out of reach.
+  useEffect(() => {
+    if (slow && on) onChange({ upscale: undefined })
+  }, [slow, on, onChange])
   let note: string
   if (!support) note = 'Checking what this device can do…'
   else if (!available) note = support.reason ?? 'On-device AI isn’t available on this device.'
+  else if (slow) note = slow
   else if (model.kind === 'needed') note = `Adds detail as it doubles the size. Needs a one-time ${formatBytes(model.models.reduce((n, m) => n + m.bytes, 0))} download.`
   else if (model.kind === 'downloading') note = `Downloading… ${Math.round(model.fraction * 100)} %`
   else if (model.kind === 'failed') note = model.message
@@ -64,12 +72,12 @@ export function UpscaleField({ value, onChange, fullSize }: { value: ExportOptio
         <b>Upscale 2× (AI)</b>
         <small aria-live="polite">{note}</small>
       </span>
-      {model.kind === 'needed' && available ? (
+      {model.kind === 'needed' && available && !slow ? (
         <button type="button" className="btn outline sm" onClick={() => void download(model.models)}>
           Download
         </button>
       ) : (
-        <Toggle label="Upscale 2× with AI" checked={on && available && model.kind !== 'downloading'} onChange={(v) => model.kind !== 'downloading' && onChange({ upscale: v ? 2 : undefined })} />
+        <Toggle label="Upscale 2× with AI" checked={on && available && !slow && model.kind !== 'downloading'} onChange={(v) => model.kind !== 'downloading' && onChange({ upscale: v && !slow ? 2 : undefined })} />
       )}
     </div>
   )

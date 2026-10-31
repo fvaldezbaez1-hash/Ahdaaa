@@ -5,6 +5,18 @@ import { ModelNotDownloadedError } from './errors'
 import { ortHeapBytes } from './worker/ort'
 import * as tasks from './worker/tasks'
 
+// MediaPipe's WebAssembly writes its glog INFO / warning lines ("INFO: Created TensorFlow Lite
+// XNNPACK delegate", "W1030 … gl_context.cc …") to stderr, i.e. console.error / warn. Drop those
+// here; real errors still come through.
+const glog = /^(INFO: |[IW]\d{4} )/
+for (const level of ['error', 'warn', 'info', 'log'] as const) {
+  const original = console[level].bind(console)
+  console[level] = (...args: unknown[]) => {
+    if (typeof args[0] === 'string' && glog.test(args[0])) return
+    original(...args)
+  }
+}
+
 const handlers = {
   segment: tasks.segment,
   selectObject: tasks.selectObject,
