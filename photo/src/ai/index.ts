@@ -48,6 +48,8 @@ export interface AiSupport {
   secondsPerMp?: Partial<Record<AiTaskName, number>>
   /** Rough seconds per run for tasks whose cost doesn't grow with the photo (segment, object, inpaint). */
   secondsPerRun?: Partial<Record<AiTaskName, number>>
+  /** Per segmentation target (they use different models). */
+  segmentSeconds?: Partial<Record<AiTarget, number>>
   /** Phones: heavy jobs (denoise, upscale) take minutes and are limited in size. */
   lowMemory: boolean
 }
@@ -63,6 +65,9 @@ export interface RunInfo {
   model: string
   backend: 'webgpu' | 'wasm'
   ms: number
+  /** Select object: time spent on the photo's features (once per photo) and on the click. */
+  encodeMs?: number
+  decodeMs?: number
 }
 
 let last: RunInfo | null = null
@@ -89,15 +94,26 @@ export async function aiSupport(): Promise<AiSupport> {
   if (typeof WebAssembly === 'undefined' || typeof Worker === 'undefined')
     return { available: false, reason: 'This browser can’t run on-device AI (it needs WebAssembly and workers).', lowMemory: low }
   const webgpu = await hasWebGpu()
-  // Measured on WASM (one thread, desktop CPU, headless Chromium; see scripts/ai/check.mjs);
-  // phones ≈ 2.5× slower; WebGPU estimated ≈ 8× faster for the big convolutional models.
-  const k = (low ? 2.5 : 1) * (webgpu ? 0.15 : 1)
+  // Measured with WASM (one thread) on a desktop CPU in headless Chromium (scripts/ai/check.mjs).
+  // Phones: ≈ 2.5× slower (estimate). WebGPU: estimated ≈ 15× faster for the big convolutional
+  // models (subject, depth, removal, denoise, upscale); MediaPipe always runs on the CPU.
+  const cpu = low ? 2.5 : 1
+  const gpu = webgpu ? 1 / 15 : 1
+  const subject = low ? 2.5 : 18 // U²-Netp on phones, IS-Net elsewhere
+  const segment: Partial<Record<AiTarget, number>> = {
+    subject: subject * cpu * gpu + 0.5,
+    background: subject * cpu * gpu + 0.5,
+    sky: 7.5 * cpu * gpu + 0.5,
+    person: 1.5 * cpu + 0.3,
+    object: 0.6 * cpu + 0.2,
+  }
   return {
     available: true,
     backend: webgpu ? 'webgpu' : 'wasm',
     lowMemory: low,
-    secondsPerMp: { denoise: 45 * k, upscale: 30 * k },
-    secondsPerRun: { segment: (low ? 3 : 6) * k + 1, object: 2 * (low ? 2.5 : 1) + 1, inpaint: 4 * k + 1 },
+    secondsPerMp: { denoise: 390 * cpu * gpu, upscale: 270 * cpu * gpu },
+    secondsPerRun: { segment: segment.subject, object: segment.object, inpaint: 3.5 * cpu * gpu + 0.5 },
+    segmentSeconds: segment,
   }
 }
 
@@ -106,7 +122,7 @@ export async function aiSupport(): Promise<AiSupport> {
 const DEFAULTS: Record<string, string> = {
   person: 'mp-selfie-multiclass',
   sky: 'depth-anything-v2-small',
-  object: 'mp-interactive',
+  object: 'mp-magic-touch',
   inpaint: 'migan-512',
   denoise: 'scunet-real',
   upscale: 'realesr-general-x4v3',
@@ -189,6 +205,9 @@ async function timed<T>(model: string, run: () => Promise<T & { backend: 'webgpu
   const t0 = performance.now()
   const r = await run()
   last = { model, backend: r.backend, ms: Math.round(performance.now() - t0) }
+  const x = r as { encodeMs?: number; decodeMs?: number }
+  if (x.encodeMs !== undefined) last.encodeMs = Math.round(x.encodeMs)
+  if (x.decodeMs !== undefined) last.decodeMs = Math.round(x.decodeMs)
   return r
 }
 
@@ -221,6 +240,13 @@ export async function selectObject(points: { x: number; y: number; positive: boo
   if (!key) imageKeys.set(image.data, (key = `img${++keyCount}`))
   opts.onProgress?.(0.1)
   const args = { points, imageKey: key, color, modelId: m.id }
+  if (m.files[0].file.endsWith('.tflite')) {
+    // Magic Touch v1 has no reusable image features: always send the photo.
+    const img = workingCopy(image, 1024)
+    const r = await timed(m.id, () => call('selectObject', { ...args, image: img }, [img.data.buffer], opts.signal))
+    opts.onProgress?.(1)
+    return { width: r.width, height: r.height, channels: 1, data: r.mask }
+  }
   const r = await timed(m.id, async () => {
     try {
       // The worker keeps the last photo's features: send pixels only when it doesn't have them.

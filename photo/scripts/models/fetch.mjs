@@ -7,7 +7,7 @@
 // against the registry's sha256 (conversions are deterministic).
 //
 // Usage (from photo/): node scripts/models/fetch.mjs [--out dir] [--cache dir] [--only id,id] [--allow-missing]
-//   --cache: keep the downloaded sources there (CI caches it between runs).
+//   --cache: keep the downloaded sources and converted results there (CI caches it between runs).
 //   --allow-missing: a model whose sources are all unreachable is skipped with
 //     a warning instead of failing (the app then reports it as unavailable).
 import { createHash } from 'node:crypto'
@@ -79,8 +79,14 @@ for (const m of wanted)
     }
     const t0 = Date.now()
     try {
-      let bytes = await source(f)
-      if (f.source.convert) bytes = converters[f.source.convert](bytes)
+      // Converted outputs are cached too (by their own sha256): converting IS-Net takes minutes.
+      const done = CACHE && f.source.convert && join(CACHE, f.sha256)
+      let bytes = done && existsSync(done) ? new Uint8Array(readFileSync(done)) : null
+      if (!bytes || sha256(bytes) !== f.sha256) {
+        bytes = await source(f)
+        if (f.source.convert) bytes = converters[f.source.convert](bytes)
+        if (done && sha256(bytes) === f.sha256) writeFileSync(done, bytes)
+      }
       const hash = sha256(bytes)
       if (hash !== f.sha256 || bytes.length !== f.bytes) throw new Error(`result sha256 ${hash} (${bytes.length} bytes) does not match the registry (${f.sha256}, ${f.bytes} bytes)`)
       writeFileSync(`${path}.part`, bytes)

@@ -65,7 +65,7 @@ export const MODELS: readonly ModelEntry[] = [
   },
   {
     id: 'mp-interactive',
-    name: 'Select object',
+    name: 'Select object (detailed)',
     task: 'object',
     runtime: 'mediapipe',
     licence: 'Apache-2.0',
@@ -74,11 +74,13 @@ export const MODELS: readonly ModelEntry[] = [
     hints: { minMemoryGB: 2, webgpu: 'no', phones: true },
     tier: 'quality',
     tested: true,
-    notes: 'Magic Touch v2 (int8 encoder + decoder): positive and negative clicks; the encoder runs once per photo.',
+    notes:
+      'Magic Touch v2 (int8): positive and negative clicks, cleaner masks than v1, but MediaPipe 1.2 re-runs its encoder on every click ' +
+      '(≈ 9 s per click on a desktop CPU), so it is not the default.',
   },
   {
     id: 'mp-magic-touch',
-    name: 'Select object (small)',
+    name: 'Select object',
     task: 'object',
     runtime: 'mediapipe',
     licence: 'Apache-2.0',
@@ -87,7 +89,7 @@ export const MODELS: readonly ModelEntry[] = [
     hints: { minMemoryGB: 1, webgpu: 'no', phones: true },
     tier: 'fast',
     tested: true,
-    notes: 'Magic Touch v1: positive clicks only (negative ones are applied by subtracting a mask around them).',
+    notes: 'Magic Touch v1, the default: ≈ 0.5 s per click. Positive clicks select together; a negative click removes what a click there would select.',
   },
   {
     id: 'u2netp',

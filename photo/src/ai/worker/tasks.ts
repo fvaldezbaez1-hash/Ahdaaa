@@ -1,7 +1,7 @@
 // What each model does, inside the AI worker: convert to the model's input,
 // run it, turn the output into a mask / fill / tile. One large model resident
 // at a time on phones.
-import type { ImageSegmenter, InteractiveSegmenter } from '@mediapipe/tasks-vision'
+import type { ImageSegmenter, InteractiveSegmenter, InteractiveSegmenterLegacy } from '@mediapipe/tasks-vision'
 import type { PersonPart } from '../../edit/types'
 import type { SourceColor } from '../../engine/types'
 import { lowMemory } from '../../io/platform'
@@ -28,7 +28,11 @@ export interface MaskResult {
 
 // ---------- model residency ----------
 
-type Loaded = { kind: 'ort'; m: OrtModel } | { kind: 'segmenter'; s: ImageSegmenter } | { kind: 'interactive'; s: InteractiveSegmenter; imageKey?: string }
+type Loaded =
+  | { kind: 'ort'; m: OrtModel }
+  | { kind: 'segmenter'; s: ImageSegmenter }
+  | { kind: 'interactive'; s: InteractiveSegmenter; imageKey?: string }
+  | { kind: 'legacy'; s: InteractiveSegmenterLegacy }
 const loaded = new Map<string, Loaded>()
 /** Bytes handed over by the main thread when Cache Storage isn't available. */
 const handed = new Map<string, ArrayBuffer[]>()
@@ -242,7 +246,10 @@ export async function segment(args: { target: 'subject' | 'background' | 'person
   return { mask: toMask8(mask), width: p.w, height: p.h, backend }
 }
 
-export async function selectObject(args: { points: { x: number; y: number; positive: boolean }[]; image?: Img; imageKey: string; color: SourceColor; modelId: string }): Promise<MaskResult> {
+export async function selectObject(args: { points: { x: number; y: number; positive: boolean }[]; image?: Img; imageKey: string; color: SourceColor; modelId: string }): Promise<MaskResult & { encodeMs: number; decodeMs: number }> {
+  const t0 = performance.now()
+  let encodeMs = 0
+  if (modelEntry(args.modelId)?.files[0].file.endsWith('.tflite')) return { ...(await selectLegacy(args)), encodeMs: 0, decodeMs: performance.now() - t0 }
   let l = loaded.get(args.modelId)
   if (l?.kind !== 'interactive') {
     makeRoom(args.modelId)
@@ -253,18 +260,52 @@ export async function selectObject(args: { points: { x: number; y: number; posit
   if (l.imageKey !== args.imageKey) {
     if (!args.image) throw new Error('needs-image')
     const p = prepare(args.image, args.color)
+    const t = performance.now()
     l.s.setImage(imageData(p))
+    encodeMs = performance.now() - t
     l.imageKey = args.imageKey
     lastSize.set(args.modelId, (size = { w: p.w, h: p.h }))
   } else size = lastSize.get(args.modelId) ?? size
+  const t1 = performance.now()
   const strokes = args.points.map((pt) => ({ brushMode: pt.positive ? mediapipe.BRUSH.positive : mediapipe.BRUSH.negative, point: [{ x: pt.x, y: pt.y }], isCompleted: true }))
   const m = l.s.segment(strokes)
   const f = m.hasFloat32Array() || !m.hasUint8Array() ? m.getAsFloat32Array().slice() : Float32Array.from(m.getAsUint8Array(), (v) => v / 255)
   const w = m.width, h = m.height
   m.close()
+  const decodeMs = performance.now() - t1
   // Stored at the size the image was given (the model's own output may be smaller).
   const mask = w === size.w && h === size.h ? f : resize(f, w, h, size.w || w, size.h || h)
-  return { mask: toMask8(mask), width: size.w || w, height: size.h || h, backend: 'wasm' }
+  return { mask: toMask8(mask), width: size.w || w, height: size.h || h, backend: 'wasm', encodeMs, decodeMs }
+}
+
+/** Magic Touch v1: one model run per selection, positive points as a scribble; negative points cut out what a click there would select. */
+async function selectLegacy(args: { points: { x: number; y: number; positive: boolean }[]; image?: Img; color: SourceColor; modelId: string }): Promise<MaskResult> {
+  if (!args.image) throw new Error('needs-image')
+  const key = `${args.modelId}#legacy`
+  let l = loaded.get(key)
+  if (l?.kind !== 'legacy') {
+    makeRoom(key)
+    l = { kind: 'legacy', s: await mediapipe.legacyInteractiveSegmenter(await fileBytes(args.modelId, 0)) }
+    loaded.set(key, l)
+  }
+  const s = l.s
+  const p = prepare(args.image, args.color)
+  const data = imageData(p)
+  const one = (pts: { x: number; y: number }[]) => {
+    let out: Float32Array = new Float32Array(p.w * p.h)
+    s.segment(data, pts.length === 1 ? { keypoint: pts[0] } : { scribble: pts }, (r) => {
+      const m = r.confidenceMasks?.[0]
+      if (m) out = m.width === p.w && m.height === p.h ? m.getAsFloat32Array().slice() : resize(m.getAsFloat32Array(), m.width, m.height, p.w, p.h)
+    })
+    return out
+  }
+  const pos = args.points.filter((x) => x.positive), neg = args.points.filter((x) => !x.positive)
+  const mask = pos.length ? one(pos) : new Float32Array(p.w * p.h)
+  for (const n of neg) {
+    const cut = one([n])
+    for (let i = 0; i < mask.length; i++) mask[i] = Math.min(mask[i], 1 - cut[i])
+  }
+  return { mask: toMask8(refine(p, mask, p.w, p.h, 0.5)), width: p.w, height: p.h, backend: 'wasm' }
 }
 const lastSize = new Map<string, { w: number; h: number }>()
 

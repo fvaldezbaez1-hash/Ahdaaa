@@ -6,6 +6,8 @@
 //
 // Usage (from photo/): node scripts/models/fetch.mjs && node scripts/ai/check.mjs <jpeg dir> <raw file> [out dir] [--quick] [--build]
 //   --quick: one photo per task.  --build: production build of the check page (tests worker/WASM bundling).
+//   --phone: low-memory mode as on an iPhone (1 GiB WASM heap cap, phone default models).
+//   --only=name,name: just these steps.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -43,7 +45,9 @@ if (flags.has('--build')) {
   await server.listen()
 }
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
-const page = await browser.newPage()
+// --phone: an iPhone user agent, so Lumen runs in low-memory mode (1 GiB WASM cap, one model at a time, phone defaults).
+const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'
+const page = await (await browser.newContext(flags.has('--phone') ? { userAgent: iphone } : {})).newPage()
 page.on('pageerror', (e) => console.log('pageerror', e.message))
 page.on('console', (m) => ['error', 'warning'].includes(m.type()) && !/favicon|Failed to load resource|onnxruntime|W\d{4}|I\d{4}/.test(m.text()) && console.log(`console.${m.type()}`, m.text().slice(0, 300)))
 await page.exposeFunction('saveOutput', (name, b64) => writeFileSync(join(OUT, name), Buffer.from(b64, 'base64')))
@@ -60,7 +64,7 @@ const quick = flags.has('--quick')
 const stroke = (pts, r) => ({ points: pts.map(([x, y]) => ({ x, y })), r, feather: 30, flow: 1 })
 
 const steps = [
-  ...['u2netp', 'isnet-general', 'mp-selfie-multiclass', 'mp-interactive', 'depth-anything-v2-small', 'migan-512', 'scunet-real', 'realesr-general-x4v3'].map((model) => ({ op: 'download', model })),
+  ...['mp-magic-touch', 'u2netp', 'isnet-general', 'mp-selfie-multiclass', 'mp-interactive', 'depth-anything-v2-small', 'migan-512', 'scunet-real', 'realesr-general-x4v3'].map((model) => ({ op: 'download', model })),
   // Subject / background
   ...(quick ? [23] : [3, 5, 6, 12, 18, 20, 23]).flatMap((p) => [
     { op: 'segment', photo: p, target: 'subject', model: 'u2netp', name: `subject-fast-${p}` },
@@ -78,13 +82,30 @@ const steps = [
   ]),
   // Click to select
   { op: 'select', photo: 23, points: [{ x: 0.22, y: 0.55, positive: true }], name: 'select-parrot-23' },
+  { op: 'select', photo: 23, points: [{ x: 0.22, y: 0.55, positive: true }], model: 'mp-magic-touch', name: 'select-v1-parrot-23' },
+  { op: 'select', photo: 6, points: [{ x: 0.35, y: 0.62, positive: true }, { x: 0.45, y: 0.25, positive: false }], model: 'mp-magic-touch', name: 'select-v1-boat-minus-mast-6' },
   { op: 'select', photo: 6, points: [{ x: 0.35, y: 0.62, positive: true }, { x: 0.45, y: 0.25, positive: false }], name: 'select-boat-minus-mast-6' },
   ...(quick ? [] : [{ op: 'select', photo: 20, points: [{ x: 0.5, y: 0.55, positive: true }], name: 'select-plane-20' }]),
   // Removal
-  { op: 'inpaint', photo: 12, strokes: [stroke([[0.45, 0.45], [0.45, 0.6], [0.44, 0.75], [0.44, 0.88]], 0.035), stroke([[0.55, 0.35], [0.56, 0.55], [0.56, 0.7], [0.57, 0.85]], 0.04)], name: 'remove-couple-12' },
+  {
+    op: 'inpaint',
+    photo: 12,
+    strokes: [
+      stroke([[0.35, 0.21], [0.34, 0.45], [0.33, 0.72]], 0.05),
+      stroke([[0.43, 0.14], [0.43, 0.4], [0.44, 0.67]], 0.05),
+      stroke([[0.31, 0.56], [0.36, 0.73]], 0.04),
+      stroke([[0.48, 0.44], [0.48, 0.6]], 0.03),
+    ],
+    name: 'remove-couple-12',
+  },
   ...(quick ? [] : [
-    { op: 'inpaint', photo: 6, strokes: [stroke([[0.12, 0.62], [0.3, 0.6], [0.5, 0.62], [0.68, 0.64]], 0.05), stroke([[0.4, 0.2], [0.42, 0.45]], 0.02)], name: 'remove-boat-6' },
-    { op: 'inpaint', photo: 21, strokes: [stroke([[0.585, 0.12], [0.585, 0.35], [0.585, 0.55]], 0.035)], name: 'remove-lighthouse-21' },
+    {
+      op: 'inpaint',
+      photo: 6,
+      strokes: [stroke([[0.12, 0.62], [0.3, 0.63], [0.5, 0.64], [0.68, 0.64]], 0.07), stroke([[0.43, 0.08], [0.43, 0.3], [0.43, 0.5]], 0.03), stroke([[0.25, 0.48], [0.55, 0.55], [0.75, 0.6]], 0.03)],
+      name: 'remove-boat-6',
+    },
+    { op: 'inpaint', photo: 21, strokes: [stroke([[0.452, 0.12], [0.452, 0.35], [0.452, 0.58]], 0.045)], name: 'remove-lighthouse-21' },
   ]),
   // Denoise: synthetic noise on a JPEG, and a crop of the RAW at full resolution
   { op: 'denoise', photo: 13, noise: 0.12, name: 'denoise-noisy-13' },
@@ -99,8 +120,11 @@ if (rawFile) {
     { op: 'inpaint', photo: 'raw', strokes: [stroke([[0.48, 0.48], [0.52, 0.52]], 0.02)], name: 'remove-raw' },
   )
 }
+// --only=name,name: run just those steps (plus the downloads).
+const only = argv.find((a) => a.startsWith('--only='))?.slice(7).split(',')
+const plan = only ? steps.filter((s) => s.op === 'download' || only.includes(s.name)) : steps
 const t0 = Date.now()
-const log = await page.evaluate((plan) => window.runCheck(plan), { photos, steps })
+const log = await page.evaluate((plan) => window.runCheck(plan), { photos, steps: plan })
 await browser.close()
 await server.close()
 let errors = 0

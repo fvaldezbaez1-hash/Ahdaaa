@@ -5,6 +5,11 @@ import type { RasterImage, RenderedImage, SourceColor, SourceImage } from '../..
 import * as ai from '../../src/ai'
 import { call } from '../../src/ai/client'
 import { autoGain, modelSpace, toModel, toRgba8 } from '../../src/ai/color'
+import { setModelBase } from '../../src/ai/models'
+import { rasterizeStrokes } from '../../src/ai/pixels'
+
+// This page lives in scripts/ai/; the models are served at the site root (public/models).
+setModelBase(new URL('/', location.href).href)
 import { decodeFile } from '../../src/io/api'
 
 declare global {
@@ -22,7 +27,7 @@ interface Plan {
 type Step =
   | { op: 'download'; model: string }
   | { op: 'segment'; photo: string; target: 'subject' | 'sky' | 'background' | 'person'; parts?: ('face' | 'body' | 'hair' | 'clothes' | 'accessories')[]; model?: string; name: string }
-  | { op: 'select'; photo: string; points: { x: number; y: number; positive: boolean }[]; name: string }
+  | { op: 'select'; photo: string; points: { x: number; y: number; positive: boolean }[]; model?: string; name: string }
   | { op: 'inpaint'; photo: string; strokes: BrushStroke[]; name: string }
   | { op: 'denoise'; photo: string; crop?: { x: number; y: number; w: number; h: number }; noise?: number; name: string }
   | { op: 'upscale'; photo: string; crop?: { x: number; y: number; w: number; h: number }; name: string }
@@ -87,13 +92,15 @@ function overlay(img: SourceImage, color: SourceColor, mask: RasterImage): { rgb
   return { rgba: out, w: w * 2, h }
 }
 
-/** Composite a removal fill into a copy of the source (hard composite through the strokes, for viewing). */
-function composite(img: SourceImage, rect: { x: number; y: number; w: number; h: number }, fill: RasterImage): SourceImage {
+/** Composite a removal fill into a copy of the source through the painted strokes (as the engine does, without its feathering). */
+function composite(img: SourceImage, rect: { x: number; y: number; w: number; h: number }, fill: RasterImage, strokes: BrushStroke[]): SourceImage {
   const out = img.data.slice()
   const W = img.width, H = img.height
   const x0 = Math.round(rect.x * W), y0 = Math.round(rect.y * H), rw = Math.round(rect.w * W), rh = Math.round(rect.h * H)
+  const mask = rasterizeStrokes(strokes, { x: x0 / W, y: y0 / H, w: rw / W, h: rh / H }, rw, rh, W, H)
   for (let y = 0; y < rh; y++)
     for (let x = 0; x < rw; x++) {
+      if (!mask[y * rw + x]) continue
       const fx = Math.min(fill.width - 1, Math.floor((x * fill.width) / rw)), fy = Math.min(fill.height - 1, Math.floor((y * fill.height) / rh))
       for (let c = 0; c < 3; c++) out[((y0 + y) * W + x0 + x) * 3 + c] = fill.data[(fy * fill.width + fx) * 3 + c]
     }
@@ -139,10 +146,11 @@ window.runCheck = async (plan: Plan) => {
       } else if (s.op === 'select') {
         const { image, color } = await photo(url)
         const t = performance.now()
-        const mask = await ai.selectObject(s.points, image, color)
+        const mask = await ai.selectObject(s.points, image, color, { model: s.model })
         const first = Math.round(performance.now() - t)
+        const firstRun = ai.lastRun()
         const t2 = performance.now()
-        await ai.selectObject(s.points, image, color) // second click on the same photo: decoder only
+        await ai.selectObject(s.points, image, color, { model: s.model }) // second click on the same photo: decoder only
         const again = Math.round(performance.now() - t2)
         const o = overlay(image, color, mask)
         // Mark the clicks.
@@ -159,11 +167,11 @@ window.runCheck = async (plan: Plan) => {
             }
         }
         await window.saveOutput(`${s.name}.png`, await png(o.rgba, o.w, o.h))
-        log.push({ step: s.name, ...ai.lastRun(), firstMs: first, againMs: again })
+        log.push({ step: s.name, model: firstRun?.model, firstMs: first, firstEncodeMs: firstRun?.encodeMs, firstDecodeMs: firstRun?.decodeMs, againMs: again, againEncodeMs: ai.lastRun()?.encodeMs, againDecodeMs: ai.lastRun()?.decodeMs })
       } else if (s.op === 'inpaint') {
         const { image, color } = await fullPhoto(url)
         const r = await ai.inpaint(image, color, { strokes: s.strokes })
-        const after = composite(image, r.rect, r.fill)
+        const after = composite(image, r.rect, r.fill, s.strokes)
         const gain = autoGain(image.data, color)
         // Show the region around the rect at full resolution: before | after.
         const W = image.width, H = image.height
