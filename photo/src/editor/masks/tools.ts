@@ -1,4 +1,7 @@
-import type { Mask, MaskShape, RetouchSpot } from '../../edit/types'
+import { spotsOf, withSpots } from '../../edit/retouch'
+import type { BrushStroke, Mask, RemoveArea, RetouchSpot } from '../../edit/types'
+import { addObjectPoint, removeObject } from '../ai/actions'
+import { aiBusy } from '../ai/jobs'
 import { uid } from '../../io/db'
 import { editor } from '../../state/editor'
 import type { Session } from '../session'
@@ -6,7 +9,7 @@ import type { StageTool, ToolPointer } from '../stage/toolBus'
 import { view } from '../view'
 import { extendStroke, fallbackSource, sizeToRadius, spotsAlong } from './brush'
 import {
-  createLinear, createRadial, dragLinear, dragRadial, dragSpot, hitHandle, hitSpot, insideRadial, linearLayout, onLinear, radialLayout,
+  createLinear, createRadial, dragLinear, dragRadial, dragSpot, hitHandle, hitRemoval, hitSpot, insideRadial, linearLayout, onLinear, radialLayout,
   type HandleId, type SpotPart,
 } from './handles'
 import { updateMask } from './model'
@@ -15,8 +18,6 @@ import { makeSpace, type Pt, type Space } from './space'
 
 // What a single pointer does on the photo while masking or healing. Every
 // gesture previews live and ends as one undo step.
-
-type BrushStroke = Extract<MaskShape, { type: 'brush' }>['strokes'][number]
 
 /** Where the brush / spot ring is drawn (photo-box CSS px), or null to hide it. */
 export type CursorFn = (c: { x: number; y: number; r: number; inner: number } | null) => void
@@ -72,6 +73,12 @@ export function createMaskTool(session: Session, cursor: CursorFn): StageTool {
         const d = developed ? describeDeveloped(developed) : describeSample(sample!, session.photo.color)
         const next: Mask = mask.range === 'luminance' ? { ...mask, low: Math.max(0, d.lum - 20), high: Math.min(100, d.lum + 20) } : { ...mask, hue: d.hue, sat: d.sat }
         editor.apply((x) => updateMask(x, layer.id, mask.id, () => next), mask.range === 'luminance' ? 'Pick brightness range' : 'Pick color range')
+        return true
+      }
+      if (mask.type === 'ai') {
+        if (mask.target !== 'object') return false
+        const m = s.toMask(p)
+        if (m.x >= 0 && m.x <= 1 && m.y >= 0 && m.y <= 1 && !aiBusy()) void addObjectPoint(session, layer.id, mask.id, { x: m.x, y: m.y, positive: !(p.alt || v.exclude) })
         return true
       }
       if (mask.type === 'brush') {
@@ -143,8 +150,13 @@ export function createMaskTool(session: Session, cursor: CursorFn): StageTool {
 type SpotDrag =
   | { kind: 'spot'; id: string; part: SpotPart; start: RetouchSpot; from: Pt; s: Space }
   | { kind: 'paint'; first: RetouchSpot; base: RetouchSpot[]; path: Pt[]; s: Space }
+  | { kind: 'remove'; stroke: BrushStroke; s: Space }
 
-const writeSpots = (spots: RetouchSpot[]) => editor.preview((r) => ({ ...r, retouch: spots }))
+const removals = (r: { retouch: readonly { mode: string }[] }) => r.retouch.filter((t): t is RemoveArea => t.mode === 'remove')
+/** Removal brushes are soft at the edge so the fill blends in. */
+const REMOVE_FEATHER = 30
+
+const writeSpots = (spots: RetouchSpot[]) => editor.preview((r) => ({ ...r, retouch: withSpots(r.retouch, spots) }))
 
 export function createHealTool(session: Session, cursor: CursorFn): StageTool {
   const src = srcOf(session)
@@ -154,10 +166,11 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
     const r = editor.getState().recipe
     if (!p || !r) return cursor(null)
     const s = makeSpace(src, r.geometry, p.box)
-    if (hitSpot(r.retouch, s, p, reachFor(p))) return cursor(null)
     const h = view.get().heal
+    const remove = h.mode === 'remove'
+    if (remove ? hitRemoval(removals(r), s, p, reachFor(p)) : hitSpot(spotsOf(r.retouch), s, p, reachFor(p))) return cursor(null)
     const rad = sizeToRadius(h.size) * s.scale
-    cursor({ x: p.x, y: p.y, r: rad, inner: rad * (1 - h.feather / 100) })
+    cursor({ x: p.x, y: p.y, r: rad, inner: rad * (1 - (remove ? REMOVE_FEATHER : h.feather) / 100) })
   }
 
   return {
@@ -165,31 +178,52 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
       const r = editor.getState().recipe
       if (!r) return false
       const s = makeSpace(src, r.geometry, p.box)
-      const hit = hitSpot(r.retouch, s, p, reachFor(p))
+      const h = view.get().heal
+      if (h.mode === 'remove') {
+        const pin = hitRemoval(removals(r), s, p, reachFor(p))
+        if (pin) {
+          view.set({ spot: pin })
+          return true
+        }
+        // One removal at a time: the painted area waits on screen until it's filled.
+        if (aiBusy() || view.get().removing) return true
+        const stroke: BrushStroke = { points: [s.toMask(p)], r: sizeToRadius(h.size), feather: REMOVE_FEATHER, flow: 1 }
+        drag = { kind: 'remove', stroke, s }
+        view.set({ removing: [stroke], spot: null })
+        return true
+      }
+      const hit = hitSpot(spotsOf(r.retouch), s, p, reachFor(p))
       if (hit) {
-        const start = r.retouch.find((sp) => sp.id === hit.id)!
+        const start = spotsOf(r.retouch).find((sp) => sp.id === hit.id)!
         view.set({ spot: hit.id })
         drag = { kind: 'spot', id: hit.id, part: hit.part, start, from: p, s }
         return true
       }
-      const h = view.get().heal
       const m = s.toMask(p)
       const rad = sizeToRadius(h.size)
       const found = session.engine.findHealSource?.(r, m.x, m.y, rad) ?? null
       const from = found ?? fallbackSource(m.x, m.y, rad, src)
-      const first: RetouchSpot = { id: uid(), mode: h.mode, x: m.x, y: m.y, r: rad, sx: from.sx, sy: from.sy, feather: h.feather, opacity: h.opacity / 100 }
-      drag = { kind: 'paint', first, base: r.retouch, path: [], s }
+      const first: RetouchSpot = { id: uid(), mode: h.mode === 'clone' ? 'clone' : 'heal', x: m.x, y: m.y, r: rad, sx: from.sx, sy: from.sy, feather: h.feather, opacity: h.opacity / 100 }
+      drag = { kind: 'paint', first, base: spotsOf(r.retouch), path: [], s }
       view.set({ spot: first.id })
       cursor(null)
-      writeSpots([...r.retouch, first])
+      writeSpots([...spotsOf(r.retouch), first])
       return true
     },
     move(p) {
       const d = drag
       if (!d) return ring(p)
+      if (d.kind === 'remove') {
+        const pts = extendStroke(d.stroke.points, d.s.toMask(p), d.stroke.r, src)
+        if (pts) {
+          d.stroke = { ...d.stroke, points: pts }
+          view.set({ removing: [d.stroke] })
+        }
+        return ring(p)
+      }
       if (d.kind === 'spot') {
         const moved = dragSpot(d.start, d.s, d.part, d.from, p)
-        writeSpots((editor.getState().recipe?.retouch ?? []).map((sp) => (sp.id === d.id ? moved : sp)))
+        writeSpots(spotsOf(editor.getState().recipe?.retouch).map((sp) => (sp.id === d.id ? moved : sp)))
       } else {
         d.path.push(d.s.toMask(p))
         writeSpots([...d.base, ...spotsAlong(d.first, d.path, src, uid)])
@@ -199,8 +233,9 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
       const d = drag
       drag = null
       if (!d) return
+      if (d.kind === 'remove') return void removeObject(session, [d.stroke])
       if (d.kind === 'spot') return editor.commit(d.part === 'edge' ? 'Heal spot size' : d.part === 'source' ? 'Move heal source' : 'Move heal spot')
-      const n = (editor.getState().recipe?.retouch.length ?? 0) - d.base.length
+      const n = spotsOf(editor.getState().recipe?.retouch).length - d.base.length
       const what = d.first.mode === 'heal' ? 'Heal' : 'Clone'
       editor.commit(n > 1 ? `${what} stroke` : `${what} spot`)
     },
@@ -208,7 +243,8 @@ export function createHealTool(session: Session, cursor: CursorFn): StageTool {
       const d = drag
       drag = null
       if (!d) return
-      writeSpots(d.kind === 'spot' ? (editor.getState().recipe?.retouch ?? []).map((sp) => (sp.id === d.id ? d.start : sp)) : d.base)
+      if (d.kind === 'remove') return view.set({ removing: null })
+      writeSpots(d.kind === 'spot' ? spotsOf(editor.getState().recipe?.retouch).map((sp) => (sp.id === d.id ? d.start : sp)) : d.base)
       editor.commit('')
       if (d.kind === 'paint') view.set({ spot: null })
     },

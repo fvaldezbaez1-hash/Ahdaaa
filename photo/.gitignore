@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# AI models: fetched at build time (scripts/models/fetch.mjs), never committed
+public/models/

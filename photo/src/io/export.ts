@@ -1,6 +1,8 @@
 // Export: decode at the size the output needs → render on the GPU → encode
 // in the IO worker → hand to the user. One photo at a time; per-file failures
 // are collected, not fatal.
+import { ai } from '../editor/ai/core'
+import type { RenderedImage } from '../engine/types'
 import { abortError, isAbort } from './abort'
 import { db } from './db'
 import { exportName, openSink } from './save'
@@ -32,18 +34,39 @@ export function sourceEdgeFor(p: PhotoRecord, longEdge: number | undefined): num
   return edge >= Math.max(w, h) ? undefined : edge
 }
 
+/** Cut a rendered image down to w × h (top-left), e.g. the pixel an odd long edge gains when upscaled ×2. */
+export function cropRendered(r: RenderedImage, w: number, h: number): RenderedImage {
+  if (w >= r.width && h >= r.height) return r
+  const W = Math.min(w, r.width), H = Math.min(h, r.height)
+  const data = r.data instanceof Uint16Array ? new Uint16Array(W * H * 4) : new Uint8ClampedArray(W * H * 4)
+  for (let y = 0; y < H; y++) data.set(r.data.subarray(y * r.width * 4, (y * r.width + W) * 4), y * W * 4)
+  return { ...r, width: W, height: H, data }
+}
+
 async function exportOne(p: PhotoRecord, opts: ExportOptions, onFraction: (f: number) => void, signal?: AbortSignal): Promise<Blob> {
-  let d: DecodedPhoto | null = await decodeStored(p, 'full', sourceEdgeFor(p, opts.longEdge), signal)
+  const up = opts.upscale === 2
+  // AI upscaling doubles the render, so render at half the requested size.
+  const edge = up ? (opts.longEdge ? Math.ceil(opts.longEdge / 2) : undefined) : opts.longEdge
+  let d: DecodedPhoto | null = await decodeStored(p, 'full', sourceEdgeFor(p, edge), signal)
   onFraction(0.35)
+  const span = up ? 0.2 : 0.45
   const rendering = seams.render(p.recipe, d, {
-    maxLongEdge: opts.longEdge,
+    maxLongEdge: edge,
     bitDepth: opts.format === 'tiff16' ? 16 : 8,
     colorSpace: opts.colorSpace,
-    onProgress: (f) => onFraction(0.35 + 0.45 * f),
+    onProgress: (f) => onFraction(0.35 + span * f),
     signal,
   })
   d = null // let the source (up to ~300 MB) go before encoding allocates
-  const r = await rendering
+  let r = await rendering
+  if (up) {
+    r = await (await ai()).upscale(r, { onProgress: (f) => onFraction(0.55 + 0.25 * f), signal })
+    const long = Math.max(r.width, r.height)
+    if (opts.longEdge && long > opts.longEdge) {
+      const k = opts.longEdge / long
+      r = cropRendered(r, r.width >= r.height ? opts.longEdge : Math.round(r.width * k), r.height > r.width ? opts.longEdge : Math.round(r.height * k))
+    }
+  }
   onFraction(0.8)
   const exif = opts.keepMetadata ? { meta: p.meta, width: r.width, height: r.height, colorSpace: opts.colorSpace, includeGps: !opts.stripLocation } : undefined
   return seams.encode({ format: opts.format, rgba: r.data as Uint8ClampedArray<ArrayBuffer> | Uint16Array, width: r.width, height: r.height, quality: opts.quality, exif, colorSpace: opts.colorSpace }, signal)

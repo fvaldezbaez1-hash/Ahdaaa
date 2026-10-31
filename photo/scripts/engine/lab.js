@@ -9,6 +9,8 @@ import { mat3 } from '/src/color/matrices.ts'
 import { rawWbForNeutral, relativeWbForNeutral, tempTintFromMultipliers } from '/src/color/wb.ts'
 
 const photos = {}
+/** Stored AI results (Phase 3), given to the engine and to every export. */
+const rasters = new Map()
 const canvas = document.createElement('canvas')
 document.body.append(canvas)
 const engine = createEngine(canvas)
@@ -69,7 +71,7 @@ async function toPng(r) {
 async function exportRender(name, patch, opts = {}) {
   const p = photos[name]
   const t0 = performance.now()
-  const r = await engine.renderImage(recipeFor(name, patch), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', maxLongEdge: opts.maxLongEdge })
+  const r = await engine.renderImage(recipeFor(name, patch), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', maxLongEdge: opts.maxLongEdge, rasters })
   const ms = Math.round(performance.now() - t0)
   let clipped = 0, sum = 0
   for (let i = 0; i < r.data.length; i += 4) {
@@ -84,7 +86,7 @@ async function exportRender(name, patch, opts = {}) {
 /** Max / mean |Δ| between the default render and the decoded JPEG. */
 async function jpegIdentity(name) {
   const p = photos[name]
-  const r = await engine.renderImage(recipeFor(name), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb' })
+  const r = await engine.renderImage(recipeFor(name), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
   let max = 0, sum = 0, n = 0
   for (let i = 0; i < r.data.length; i += 4)
     for (let k = 0; k < 3; k++) {
@@ -112,8 +114,8 @@ async function jpegIdentity(name) {
 /** Median linear ratio of exposure +1 vs default over midtone pixels. */
 async function exposureRatio(name) {
   const p = photos[name]
-  const a = await engine.renderImage(recipeFor(name), p.image, p.color, { bitDepth: 16, colorSpace: 'srgb' })
-  const b = await engine.renderImage(recipeFor(name, { basic: { exposure: 1 } }), p.image, p.color, { bitDepth: 16, colorSpace: 'srgb' })
+  const a = await engine.renderImage(recipeFor(name), p.image, p.color, { bitDepth: 16, colorSpace: 'srgb', rasters })
+  const b = await engine.renderImage(recipeFor(name, { basic: { exposure: 1 } }), p.image, p.color, { bitDepth: 16, colorSpace: 'srgb', rasters })
   const lin = (v) => { const e = v / 65535; return e <= 0.04045 ? e / 12.92 : ((e + 0.055) / 1.055) ** 2.4 }
   const ratios = []
   for (let i = 0; i < a.data.length; i += 4) {
@@ -139,7 +141,7 @@ async function eyedropper(name) {
   engine.render(base)
   const s = engine.samplePixel(0.5, 0.5, 4)
   const wb = raw ? rawWbForNeutral(p.color.camXyz, p.color.shotMul, s) : relativeWbForNeutral(s)
-  const r = await engine.renderImage({ ...base, wb: { preset: 'custom', ...wb } }, image, p.color, { bitDepth: 16, colorSpace: 'srgb' })
+  const r = await engine.renderImage({ ...base, wb: { preset: 'custom', ...wb } }, image, p.color, { bitDepth: 16, colorSpace: 'srgb', rasters })
   const c = [r.data[0], r.data[1], r.data[2]].map((v) => v / 65535)
   return { sample: s, wb, out: c, spread: Math.max(...c) - Math.min(...c) }
 }
@@ -151,7 +153,7 @@ async function tiling(name, patch) {
   const gl = c2.getContext('webgl2')
   const gpu = new Gpu(gl, detectCaps(gl))
   const recipe = recipeFor(name, patch)
-  const opts = { bitDepth: 16, colorSpace: 'srgb' }
+  const opts = { bitDepth: 16, colorSpace: 'srgb', rasters }
   const t0 = performance.now()
   const a = await renderTiled(gpu, recipe, p.image, p.color, opts, 8192)
   const t1 = performance.now()
@@ -284,7 +286,7 @@ async function regionCheck(name, patch, x, y) {
   const px = new Uint8Array(640 * 480 * 4)
   gl.readPixels(0, 0, 640, 480, gl.RGBA, gl.UNSIGNED_BYTE, px)
   const ms = Math.round(performance.now() - t0)
-  const ex = await engine.renderImage(recipe, full, p.color, { bitDepth: 8, colorSpace: 'srgb' })
+  const ex = await engine.renderImage(recipe, full, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
   let max = 0, sum = 0
   for (let j = 0; j < 480; j++)
     for (let i = 0; i < 640; i++) {
@@ -312,7 +314,7 @@ async function canvasParity(name, patch) {
   const gl = canvas.getContext('webgl2')
   const px = new Uint8Array(out.width * out.height * 4)
   gl.readPixels(0, 0, out.width, out.height, gl.RGBA, gl.UNSIGNED_BYTE, px)
-  const ex = await engine.renderImage(recipe, p.image, p.color, { bitDepth: 8, colorSpace: 'srgb' })
+  const ex = await engine.renderImage(recipe, p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
   let max = 0, sum = 0, over2 = 0
   for (let y = 0; y < out.height; y++)
     for (let x = 0; x < out.width; x++)
@@ -332,8 +334,8 @@ async function healCheck(name, x, y, r) {
   const base = recipeFor(name)
   const src = engine.findHealSource(base, x, y, r)
   const spot = { id: 'h1', mode: 'heal', x, y, r, sx: src.sx, sy: src.sy, feather: 30, opacity: 1 }
-  const a = await engine.renderImage(base, p.image, p.color, { bitDepth: 8, colorSpace: 'srgb' })
-  const b = await engine.renderImage({ ...base, retouch: [spot] }, p.image, p.color, { bitDepth: 8, colorSpace: 'srgb' })
+  const a = await engine.renderImage(base, p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
+  const b = await engine.renderImage({ ...base, retouch: [spot] }, p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
   const W = a.width, L = Math.max(W, a.height), cx = x * W, cy = y * a.height, R = r * L
   const lum = (img, i) => 0.2126 * img.data[i] + 0.7152 * img.data[i + 1] + 0.0722 * img.data[i + 2]
   const stats = (img) => {
@@ -399,11 +401,125 @@ async function developedSample(name, patch, nx, ny) {
   engine.resize(out.width, out.height)
   engine.render(recipe)
   const s = engine.samplePixel(nx, ny, 2, { developed: true })
-  const ex = await engine.renderImage({ ...recipe, layers: [] }, p.image, p.color, { bitDepth: 16, colorSpace: 'srgb' })
+  const ex = await engine.renderImage({ ...recipe, layers: [] }, p.image, p.color, { bitDepth: 16, colorSpace: 'srgb', rasters })
   const x = Math.floor(nx * ex.width), y = Math.floor(ny * ex.height), m = [0, 0, 0]
   for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) for (let k = 0; k < 3; k++) m[k] += ex.data[((y + j) * ex.width + x + i) * 4 + k] / 65535 / 25
   return { developed: s, exportWithoutLayers: m, maxDiff: Math.max(...m.map((v, k) => Math.abs(v - s[k]))) }
 }
 
-window.lab = { developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
+function setRaster(id, img) {
+  rasters.set(id, img)
+  engine.setRaster(id, img)
+}
+
+/** Synthetic AI results: a soft blob mask, photo-21's sky (thresholded), a removal fill, a denoised ARW. */
+async function setupRasters() {
+  const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+  const bw = 256, bh = 171, blob = new Uint8Array(bw * bh)
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) blob[y * bw + x] = Math.round(255 * (1 - ss(0.22, 0.3, Math.hypot(x / bw - 0.55, (y - bh * 0.45) / bw))))
+  setRaster('blob', { width: bw, height: bh, channels: 1, data: blob })
+  // Sky of the lighthouse: bluish and bright in the upper part, at 1/4 resolution like a model's output.
+  const j = photos['photo-21.jpg'], W = 768, H = 512, sw = W / 4, sh = H / 4, sky = new Uint8Array(sw * sh)
+  for (let y = 0; y < sh; y++)
+    for (let x = 0; x < sw; x++) {
+      let n = 0
+      for (let dy = 0; dy < 4; dy++)
+        for (let dx = 0; dx < 4; dx++) {
+          const o = ((y * 4 + dy) * W + x * 4 + dx) * 4, r = j.rgba[o], g = j.rgba[o + 1], b = j.rgba[o + 2]
+          if (b > r + 15 && (r + g + b) / 3 > 90 && y * 4 < H * 0.62) n++
+        }
+      sky[y * sw + x] = Math.round((n / 16) * 255)
+    }
+  setRaster('sky', { width: sw, height: sh, channels: 1, data: sky })
+  // Removal fill: the ARW's rect averaged 8× — a smooth, grain-free stand-in for an inpainting result.
+  const a = photos.arw.image, rect = { x: 0.075, y: 0.27, w: 0.07, h: 0.09 }
+  const rx = Math.round(rect.x * a.width), ry = Math.round(rect.y * a.height), rw = Math.round(rect.w * a.width), rh = Math.round(rect.h * a.height)
+  const fw = Math.ceil(rw / 8), fh = Math.ceil(rh / 8), fill = new Uint16Array(fw * fh * 3)
+  for (let y = 0; y < fh; y++)
+    for (let x = 0; x < fw; x++)
+      for (let c = 0; c < 3; c++) {
+        let sum = 0, n = 0
+        for (let dy = 0; dy < 8; dy++) for (let dx = 0; dx < 8; dx++) {
+          const sx = Math.min(a.width - 1, rx + x * 8 + dx), sy = Math.min(a.height - 1, ry + y * 8 + dy)
+          sum += a.data[(sy * a.width + sx) * 3 + c]
+          n++
+        }
+        fill[(y * fw + x) * 3 + c] = Math.round(sum / n)
+      }
+  setRaster('fill', { width: fw, height: fh, channels: 3, data: fill })
+  // "Denoised" ARW: a 5×5 box blur of it.
+  const d = new Uint16Array(a.data.length), tmp = new Float32Array(a.data.length)
+  for (let y = 0; y < a.height; y++) for (let x = 0; x < a.width; x++) for (let c = 0; c < 3; c++) {
+    let sum = 0
+    for (let k = -2; k <= 2; k++) sum += a.data[(y * a.width + Math.min(a.width - 1, Math.max(0, x + k))) * 3 + c]
+    tmp[(y * a.width + x) * 3 + c] = sum / 5
+  }
+  for (let y = 0; y < a.height; y++) for (let x = 0; x < a.width; x++) for (let c = 0; c < 3; c++) {
+    let sum = 0
+    for (let k = -2; k <= 2; k++) sum += tmp[(Math.min(a.height - 1, Math.max(0, y + k)) * a.width + x) * 3 + c]
+    d[(y * a.width + x) * 3 + c] = Math.round(sum / 5)
+  }
+  photos.arwDenoised = { image: { width: a.width, height: a.height, data: d, fullWidth: a.fullWidth }, color: photos.arw.color }
+  setRaster('dn', { width: a.width, height: a.height, channels: 3, data: d })
+  return { rect: [rx, ry, rw, rh], fill: [fw, fh] }
+}
+
+/** Mean absolute 3×3 high-pass of an RGBA image (grain / detail energy) inside a rect. */
+function grain(img, x0, y0, x1, y1) {
+  ;[x0, y0, x1, y1] = [x0, y0, x1, y1].map(Math.round)
+  let s = 0, n = 0
+  for (let y = Math.max(1, y0); y < Math.min(img.height - 1, y1); y++)
+    for (let x = Math.max(1, x0); x < Math.min(img.width - 1, x1); x++) {
+      const o = (y * img.width + x) * 4
+      let m = 0
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (i || j) m += img.data[o + (j * img.width + i) * 4 + 1]
+      s += Math.abs(img.data[o + 1] - m / 8)
+      n++
+    }
+  return s / Math.max(1, n)
+}
+
+/** Denoise blend: amount 0 = the photo, 100 = the denoised raster as the photo, 50 between. */
+async function denoiseCheck() {
+  const p = photos.arw
+  const at = async (amount) => engine.renderImage(recipeFor('arw', { denoise: { amount, raster: 'dn', model: 'test' } }), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', maxLongEdge: 1200, rasters })
+  const plain = await engine.renderImage(recipeFor('arw'), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', maxLongEdge: 1200, rasters })
+  const asSource = await engine.renderImage(recipeFor('arw'), photos.arwDenoised.image, p.color, { bitDepth: 8, colorSpace: 'srgb', maxLongEdge: 1200, rasters })
+  const [a0, a50, a100] = [await at(0), await at(50), await at(100)]
+  const maxDiff = (a, b) => { let m = 0; for (let i = 0; i < a.data.length; i++) if (i % 4 !== 3) m = Math.max(m, Math.abs(a.data[i] - b.data[i])); return m }
+  const g = (img) => Math.round(grain(img, 0, 0, img.width, img.height) * 100) / 100
+  return { amount0VsPlain: maxDiff(a0, plain), amount100VsDenoisedSource: maxDiff(a100, asSource), grain: { 0: g(a0), 50: g(a50), 100: g(a100) } }
+}
+
+/** Removal on the ARW: before / after crops (×2) and the grain inside vs around the filled area. */
+async function removalCheck(patch, rectPx) {
+  const p = photos.arw
+  const a = await engine.renderImage(recipeFor('arw'), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
+  const b = await engine.renderImage(recipeFor('arw', patch), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
+  const [rx, ry, rw, rh] = rectPx, e = Math.round(Math.max(rw, rh) * 0.4)
+  const inner = grain(b, rx + rw * 0.3, ry + rh * 0.3, rx + rw * 0.7, ry + rh * 0.7)
+  const around = (img) => (grain(img, rx - e, ry - e, rx, ry + rh + e) + grain(img, rx + rw, ry - e, rx + rw + e, ry + rh + e)) / 2
+  const cw = rw + 2 * e, ch = rh + 2 * e, z = 2, comp = new Uint8ClampedArray(cw * z * 2 * ch * z * 4)
+  ;[a, b].forEach((img, k) => {
+    for (let y = 0; y < ch * z; y++)
+      for (let x = 0; x < cw * z; x++) {
+        const sx = Math.min(img.width - 1, Math.max(0, rx - e + Math.floor(x / z))), sy = Math.min(img.height - 1, Math.max(0, ry - e + Math.floor(y / z)))
+        const q = (sy * img.width + sx) * 4
+        comp.set([img.data[q], img.data[q + 1], img.data[q + 2], 255], (y * cw * z * 2 + k * cw * z + x) * 4)
+      }
+  })
+  return { grainInside: Math.round(inner * 100) / 100, grainAround: Math.round(around(b) * 100) / 100, png: await toPng({ width: cw * z * 2, height: ch * z, data: comp }) }
+}
+
+/** Max difference between the export of a recipe and of the default recipe (no-op edits must be exact). */
+async function vsPlain(name, patch) {
+  const p = photos[name]
+  const a = await engine.renderImage(recipeFor(name), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
+  const b = await engine.renderImage(recipeFor(name, patch), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
+  let m = 0
+  for (let i = 0; i < a.data.length; i++) m = Math.max(m, Math.abs(a.data[i] - b.data[i]))
+  return { maxDiff: m }
+}
+
+window.lab = { vsPlain, setupRasters, denoiseCheck, removalCheck, developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
 window.ready = true

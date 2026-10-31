@@ -185,7 +185,7 @@ describe('layers', () => {
   const radial: Mask = { type: 'radial', cx: 0.5, cy: 0.5, rx: 0.1, ry: 0.1, angle: 0, feather: 50, id: 'm1', mode: 'add', invert: false }
 
   it('names new layers by kind, numbering repeats', () => {
-    const a = newLayer([], 'radial', radial, { layer: 'L1', mask: 'm1' })
+    const a = newLayer([], radial, { layer: 'L1', mask: 'm1' })
     expect(a.name).toBe('Radial')
     expect(nextName([a], 'Radial')).toBe('Radial 2')
     expect(a.masks[0]).toMatchObject({ id: 'm1', mode: 'add', invert: false })
@@ -217,7 +217,7 @@ describe('layers', () => {
 
 describe('undo grouping', () => {
   it('turns a whole brush stroke into one undo step', () => {
-    const layer = newLayer([], 'brush', { type: 'brush', strokes: [] }, { layer: 'L', mask: 'b' })
+    const layer = newLayer([], { type: 'brush', strokes: [] }, { layer: 'L', mask: 'b' })
     editor.open('p', { ...defaultRecipe('display'), layers: [layer] }, 'display')
     const stroke = { points: [{ x: 0.1, y: 0.1 }], r: 0.02, feather: 50, flow: 1 }
     for (let i = 0; i < 20; i++) {
@@ -248,7 +248,7 @@ describe('undo grouping', () => {
 describe('copy & paste of masks and healing', () => {
   const src: EditRecipe = {
     ...defaultRecipe('display'),
-    layers: [newLayer([], 'radial', { type: 'radial', cx: 0.5, cy: 0.5, rx: 0.1, ry: 0.1, angle: 0, feather: 50 }, { layer: 'L', mask: 'm' })],
+    layers: [newLayer([], { type: 'radial', cx: 0.5, cy: 0.5, rx: 0.1, ry: 0.1, angle: 0, feather: 50 }, { layer: 'L', mask: 'm' })],
     retouch: [{ id: 's', mode: 'heal', x: 0.5, y: 0.5, r: 0.02, sx: 0.6, sy: 0.5, feather: 50, opacity: 1 }],
   }
   const clip = makeClipboard({ recipe: src, kind: 'display' })

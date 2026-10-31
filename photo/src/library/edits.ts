@@ -1,5 +1,6 @@
 // Copy / paste / reset of edit recipes between photos (pure).
 import { defaultRecipe, isUnedited, normalizeRecipe } from '../edit/defaults'
+import { blankRasters } from '../editor/ai/refs'
 import type { EditRecipe, SourceKind } from '../edit/types'
 import type { PhotoRecord } from '../io/types'
 
@@ -44,7 +45,9 @@ export function pasteOnto(target: Target, clip: Clipboard): EditRecipe {
       else if (srcKind === target.kind) next.wb = { ...src.wb }
       continue
     }
-    write[part as RecipePart] = structuredClone(src[part as RecipePart])
+    // AI masks and removals were computed for the photo they came from: blank them to recompute here.
+    const value = part === 'layers' || part === 'retouch' ? blankRasters({ [part]: src[part] })[part] : src[part as RecipePart]
+    write[part as RecipePart] = structuredClone(value)
   }
   // The look describes the tone settings, so it travels with them (not with a crop-only paste).
   if (clip.parts.some((p) => p !== 'geometry' && p !== 'retouch' && (ALL_PARTS as readonly string[]).includes(p))) next.look = src.look ? { ...src.look } : undefined

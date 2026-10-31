@@ -5,6 +5,8 @@ import { CropOverlay } from '../crop/CropOverlay'
 import { pickWhiteBalance } from '../panels/actions'
 import { useSession } from '../session'
 import { useView, view } from '../view'
+import { useEditor } from '../../state/editor'
+import { AiStageChip } from '../ai/AiJobCard'
 import { ToolHint } from '../masks/ToolHint'
 import { ToolOverlay } from '../masks/ToolOverlay'
 import { isTyping } from '../../ui/hooks'
@@ -46,6 +48,7 @@ export function Stage({ pad }: { pad: number }) {
   const holding = useView((s) => s.holding)
   const mode = useView((s) => s.mode)
   const zoom = useView((s) => s.zoom)
+  const denoised = useEditor((s) => (s.recipe?.denoise?.amount ?? 0) > 0)
   const [notice, setNotice] = useState(session.photo.notice)
 
   useEffect(() => {
@@ -201,6 +204,12 @@ export function Stage({ pad }: { pad: number }) {
         {tool === 'crop' ? <CropOverlay /> : photoTool(tool) ? <ToolOverlay /> : <CompareOverlay />}
       </div>
       {(holding || mode === 'before') && !tool && <span className="ed-badge">Original</span>}
+      {denoised && !holding && mode !== 'before' && (
+        <span className="ed-badge ed-badge-ai">
+          <Icon name="sparkle" size={11} /> AI denoised
+        </span>
+      )}
+      <AiStageChip />
       {photoTool(tool) && <ToolHint />}
       {eyedropper && (
         <div className="ed-stage-hint" role="status">

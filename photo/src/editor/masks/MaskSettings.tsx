@@ -9,7 +9,11 @@ import { useSession } from '../session'
 import { useView, view } from '../view'
 import { ToolIcon } from './icons'
 import { KindChooser } from './KindChooser'
-import { kindOf, maskLabel, updateMask } from './model'
+import { createAiMask, createObjectMask, recomputeAiMask } from '../ai/actions'
+import { useAiJob } from '../ai/jobs'
+import { useMissingRasters } from '../ai/rasterSync'
+import { needsCompute, type AiMask } from '../ai/refs'
+import { kindOf, maskLabel, PERSON_PARTS, updateMask } from './model'
 import { addMaskToLayer, deleteMask } from './modes'
 
 const MODES: { value: MaskMode; label: string }[] = [
@@ -86,11 +90,58 @@ function RangeSettings({ layerId, mask }: { layerId: string; mask: Extract<Mask,
   )
 }
 
+/** Select object: whether clicks add to the selection or leave parts out (Alt-click on a keyboard). */
+function ObjectMode() {
+  const exclude = useView((s) => s.exclude)
+  return (
+    <Segmented
+      label="Clicks"
+      value={exclude ? 'exclude' : 'include'}
+      className="ed-seg-full"
+      onChange={(v) => view.set({ exclude: v === 'exclude' })}
+      options={[
+        { value: 'include', label: 'Include', title: 'Clicks add to the object' },
+        { value: 'exclude', label: 'Leave out', title: 'Clicks leave a part out (Alt-click)' },
+      ]}
+    />
+  )
+}
+
+function AiSettings({ layerId, mask }: { layerId: string; mask: AiMask }) {
+  const session = useSession()
+  const missing = useMissingRasters()
+  const busy = useAiJob()?.scope === 'mask'
+  const stale = needsCompute(mask.raster, missing)
+  const parts = mask.target === 'person' ? (mask.parts ?? PERSON_PARTS.map((p) => p.part)) : null
+  return (
+    <div className="stack tight">
+      {mask.target === 'object' && <ObjectMode />}
+      {mask.target === 'object' ? (
+        <p className="muted small">
+          {mask.points?.length
+            ? `${mask.points.length} point${mask.points.length === 1 ? '' : 's'}. Click to add more of the object; Alt-click (or switch below) to leave a part out.`
+            : 'Click the object on the photo to select it.'}
+        </p>
+      ) : (
+        parts && <p className="muted small">{parts.length === PERSON_PARTS.length ? 'All of each person' : PERSON_PARTS.filter((p) => parts.includes(p.part)).map((p) => p.label).join(', ')}</p>
+      )}
+      {stale && (mask.target !== 'object' || !!mask.points?.length) && (
+        <div className="ed-ai-card">
+          <p className="small">{mask.raster ? 'This mask’s AI result isn’t on this device (restored from a backup or pasted from another photo).' : 'This mask hasn’t been computed for this photo yet.'}</p>
+          <button type="button" className="btn outline sm" disabled={busy} onClick={() => void recomputeAiMask(session, layerId, mask.id)}>
+            Recompute
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Settings of the selected mask: brush, gradient feather or range. */
 function SelectedMask({ layerId, mask }: { layerId: string; mask: Mask }) {
   if (mask.type === 'brush') return <BrushSettings />
   if (mask.type === 'range') return <RangeSettings layerId={layerId} mask={mask} />
-  if (mask.type === 'ai') return <p className="muted small">AI masks are coming soon.</p>
+  if (mask.type === 'ai') return <AiSettings layerId={layerId} mask={mask} />
   return (
     <div className="stack tight">
       {mask.type === 'radial' && <MaskSlider layerId={layerId} mask={mask} field="feather" label="Feather" def={50} />}
@@ -103,7 +154,9 @@ function SelectedMask({ layerId, mask }: { layerId: string; mask: Mask }) {
 
 /** The masks that make up one layer, how they combine, and the selected one's settings. */
 export function MaskList({ layerId }: { layerId: string }) {
-  const { record } = useSession()
+  const session = useSession()
+  const { record } = session
+  const missing = useMissingRasters()
   const layer = useEditor((s) => s.recipe?.layers.find((l) => l.id === layerId))
   const selectedId = useView((s) => s.mask)
   const [adding, setAdding] = useState<MaskMode | null>(null)
@@ -118,6 +171,7 @@ export function MaskList({ layerId }: { layerId: string }) {
             <button type="button" className="ed-mask-name" aria-current={m.id === selected?.id ? 'true' : undefined} onClick={() => view.set({ mask: m.id, placing: null, rangePick: false })}>
               <ToolIcon name={kindOf(m) === 'ai' ? 'ai' : (kindOf(m) as 'brush')} size={16} />
               <span className="ellipsis">{maskLabel(m)}</span>
+              {m.type === 'ai' && needsCompute(m.raster, missing) && (m.target !== 'object' || !!m.points?.length) && <span className="ed-warn-dot" aria-label="(needs recomputing)" />}
             </button>
             {i === 0 ? (
               <span className="ed-mask-mode muted small">Base</span>
@@ -162,6 +216,11 @@ export function MaskList({ layerId }: { layerId: string }) {
             onPick={(k) => {
               addMaskToLayer(layerId, k, adding, src)
               setAdding(null)
+            }}
+            onPickAi={(target, parts) => {
+              setAdding(null)
+              if (target === 'object') createObjectMask({ layerId, mode: adding })
+              else void createAiMask(session, target, { parts, layerId, mode: adding })
             }}
           />
         </div>

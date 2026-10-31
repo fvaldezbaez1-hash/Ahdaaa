@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { useMediaQuery } from '../ui/hooks'
 import type { Histogram, ViewMode } from '../engine/types'
+import type { BrushStroke } from '../edit/types'
 import type { MaskKind } from './masks/model'
 
 // UI state of the editing screen that several parts share (toolbar, stage,
@@ -23,7 +24,8 @@ export interface HealSettings {
   feather: number
   /** 1…100 %. */
   opacity: number
-  mode: 'heal' | 'clone'
+  /** 'remove' paints an area for AI object removal instead of placing spots. */
+  mode: 'heal' | 'clone' | 'remove'
 }
 export type SheetId = 'export' | 'paste' | 'shortcuts' | null
 
@@ -63,13 +65,18 @@ export interface ViewState {
   brush: BrushSettings
   /** Healing: settings for new spots, and the selected spot. */
   heal: HealSettings
+  /** Selected heal spot or removal. */
   spot: string | null
+  /** AI removal: the area painted and being filled. */
+  removing: BrushStroke[] | null
+  /** Select object: clicks leave parts out (what Alt-click does, for touch screens). */
+  exclude: boolean
 }
 
 const initial: ViewState = {
   mode: 'after', split: 0.5, holding: false, clipping: false, tool: null, eyedropper: false, leveling: false, grid: 'none', zoom: 1, zoom100: 1, histogram: null,
   sheet: null, ai: false, leftPanel: { wide: true, narrow: false },
-  layer: null, mask: null, overlay: true, placing: null, rangePick: false, spot: null,
+  layer: null, mask: null, overlay: true, placing: null, rangePick: false, spot: null, removing: null, exclude: false,
   brush: { size: 50, feather: 50, flow: 100, erase: false },
   heal: { size: 40, feather: 50, opacity: 100, mode: 'heal' },
 }

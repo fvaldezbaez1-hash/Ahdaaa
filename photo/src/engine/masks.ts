@@ -98,8 +98,50 @@ export function combineMask(prev: number, v: number, mode: MaskMode, invert: boo
   return Math.max(prev, x)
 }
 
-/** Masks the renderer draws (AI masks arrive in Phase 3). */
-export const drawableMasks = (masks: Mask[]) => masks.filter((m) => m.type !== 'ai')
+/** Masks the renderer draws (all kinds; an AI mask without its raster is simply empty). */
+export const drawableMasks = (masks: Mask[]) => masks
+
+/** AI mask refinement: spatial σ in raster pixels, range σ in stops of luminance. */
+export const AI_SPATIAL_SIGMA = 0.7
+export const AI_RANGE_SIGMA = 0.35
+
+/**
+ * Joint bilateral upsampling of a low-res AI mask at raster position (rx, ry): the 4×4 nearest
+ * raster samples, weighted by distance and by how close the photo's luminance at each sample
+ * (`guideAt`, log2) is to this pixel's (`guideHere`) — so the mask edge follows the photo's.
+ */
+export function aiMaskValue(rx: number, ry: number, w: number, h: number, maskAt: (i: number, j: number) => number, guideAt: (i: number, j: number) => number, guideHere: number): number {
+  const i0 = Math.floor(rx - 0.5) - 1, j0 = Math.floor(ry - 0.5) - 1
+  let sum = 0, wsum = 0
+  for (let j = j0; j < j0 + 4; j++)
+    for (let i = i0; i < i0 + 4; i++) {
+      const ci = Math.min(w - 1, Math.max(0, i)), cj = Math.min(h - 1, Math.max(0, j))
+      const ds = (rx - (i + 0.5)) ** 2 + (ry - (j + 0.5)) ** 2
+      const dl = guideAt(ci, cj) - guideHere
+      const wt = Math.exp(-ds / (2 * AI_SPATIAL_SIGMA ** 2) - (dl * dl) / (2 * AI_RANGE_SIGMA ** 2))
+      sum += wt * maskAt(ci, cj)
+      wsum += wt
+    }
+  return wsum > 0 ? sum / wsum : 0
+}
+
+/**
+ * Sensor-like noise level k (σ = k·√v) from pixel values and their high-pass (v − mean of the
+ * 8 neighbours): a trimmed mean of |hf|/√v, so edges in the sample ring don't inflate it.
+ */
+export function noiseLevel(samples: { v: number; hf: number }[]): number {
+  const r = samples.map((s) => Math.abs(s.hf) / Math.sqrt(Math.max(s.v, 1e-6)))
+  const m1 = r.reduce((a, b) => a + b, 0) / Math.max(1, r.length)
+  const kept = r.filter((x) => x <= 2.5 * m1)
+  // σ = E|hf|·√(π/2) / √(1 + 1/8): Gaussian mean absolute deviation of an 8-neighbour high-pass.
+  return ((kept.reduce((a, b) => a + b, 0) / Math.max(1, kept.length)) * Math.sqrt(Math.PI / 2)) / Math.sqrt(1.125)
+}
+
+/** Removal: the fill (plus grain of the surroundings' level, `gauss` ~ N(0, 1)) blended in through the mask. */
+export function removeBlend(orig: number, fill: number, mask: number, gauss: number, k: number): number {
+  const f = Math.max(0, fill)
+  return orig + (f + gauss * k * Math.sqrt(f) - orig) * mask
+}
 
 /** Numbers per layer, 4 × vec4 in the shaders' order. */
 export const LAYER_FLOATS = 16

@@ -1,3 +1,4 @@
+import { AiDenoise } from '../ai/AiDenoise'
 import { RecipeSlider } from './RecipeSlider'
 import { SubHead } from './Section'
 import { TRACK } from './tracks'
@@ -38,6 +39,8 @@ export function PresenceSliders({ color = true, local = true }: { color?: boolea
 export function DetailSliders() {
   return (
     <>
+      <SubHead>AI Denoise</SubHead>
+      <AiDenoise />
       <SubHead>Sharpening</SubHead>
       <RecipeSlider path="detail.sharpen" label="Amount" history="Sharpening" />
       <RecipeSlider path="detail.radius" label="Radius" history="Sharpening radius" />

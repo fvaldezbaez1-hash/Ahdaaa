@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { version } from '../../package.json'
 import { AiSettings } from '../assistant/AiSettings'
+import { ModelsCard } from '../editor/ai/ModelsCard'
 import { SHORTCUTS as EDITOR_SHORTCUTS } from '../editor/shortcuts'
 import type { ExportOptions } from '../io/types'
 import { ExportFields } from '../library/ExportFields'
@@ -73,6 +74,7 @@ const WORDS = new Set(['click', 'arrows', 'to'])
 const SECTIONS: { id: string; label: string; icon: IconName }[] = [
   { id: 'appearance', label: 'Appearance', icon: 'sun' },
   { id: 'ai', label: 'AI assistant', icon: 'sparkle' },
+  { id: 'models', label: 'AI models', icon: 'wand' },
   { id: 'export', label: 'Export', icon: 'download' },
   { id: 'storage', label: 'Storage & backup', icon: 'folder' },
   { id: 'keys', label: 'Keyboard shortcuts', icon: 'keyboard' },
@@ -129,6 +131,10 @@ export function SettingsScreen() {
               <div className="set-card">
                 <AiSettings />
               </div>
+            </Section>
+
+            <Section id="models" title="AI models" desc="Masks, object removal, AI Denoise and upscaling run on this device with models downloaded once from Lumen’s own site. Your photos never leave the device.">
+              <ModelsCard />
             </Section>
 
             <Section id="export" title="Export defaults" desc="Used every time you export. You can still change them in the export window.">

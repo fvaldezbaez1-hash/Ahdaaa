@@ -1,6 +1,7 @@
 // GLSL for local adjustments (masks, layer parameters) and retouching. The mask
 // math mirrors masks.ts (unit-tested there). Same conventions as shaders.ts.
 
+import { AI_RANGE_SIGMA, AI_SPATIAL_SIGMA } from './masks'
 import { HEAD, PRELUDE } from './shaders'
 
 const SS = `
@@ -9,7 +10,8 @@ float ss(float a, float b, float x) { float t = clamp((x - a) / max(b - a, 1e-6)
 
 /**
  * One mask of a layer, combined into the layer's running mask. Types: 0 linear, 1 radial,
- * 2 brush (pre-rasterized), 3 luminance range, 4 color range. Positions in source px.
+ * 2 brush (pre-rasterized), 3 luminance range, 4 color range, 5 AI (low-res raster refined by
+ * joint bilateral upsampling against the photo). Positions in source px.
  */
 export const MASK = () => `${HEAD}${SS}
 uniform sampler2D u_prev;
@@ -25,6 +27,17 @@ uniform vec4 u_a;
 uniform vec4 u_b;
 uniform float u_px;           // source px per output px (antialiasing width)
 uniform vec3 u_outLuma;
+uniform sampler2D u_raster;   // AI mask, 0…1, covering the whole source
+uniform bool u_hasRaster;
+uniform vec2 u_rasterSize;
+uniform sampler2D u_scene;    // the photo in the region (source primaries) — the guide
+uniform vec3 u_luma;
+uniform mat3 u_fromSource;    // source px → output px
+uniform vec2 u_fullSize;
+float guide(vec2 q) {
+  ivec2 i = clamp(ivec2(floor(q)), ivec2(0), textureSize(u_scene, 0) - 1);
+  return log2(max(dot(texelFetch(u_scene, i, 0).rgb, u_luma), 1e-4));
+}
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec2 X = (u_toSource * vec3(gl_FragCoord.xy + u_regionOrigin, 1.0)).xy;
@@ -40,6 +53,25 @@ void main() {
     v = 1.0 - ss(1.0 - max(u_b.y, u_px / min(u_a.z, u_a.w)), 1.0, dist);
   } else if (u_type == 2) {
     v = texelFetch(u_brush, p, 0).r;
+  } else if (u_type == 5) {
+    if (u_hasRaster) {
+      // 4×4 raster samples weighted by distance and by the photo's luminance where each sits
+      // vs. here, so the edge follows hair and outlines at any resolution (see masks.ts aiMaskValue).
+      vec2 R = X / u_fullSize * u_rasterSize;
+      ivec2 b = ivec2(floor(R - 0.5)) - 1, last = ivec2(u_rasterSize) - 1;
+      float here = guide(gl_FragCoord.xy), sum = 0.0, wsum = 0.0;
+      for (int j = 0; j < 4; j++)
+        for (int i = 0; i < 4; i++) {
+          ivec2 c = clamp(b + ivec2(i, j), ivec2(0), last);
+          vec2 ds = R - (vec2(b + ivec2(i, j)) + 0.5);
+          vec2 q = (u_fromSource * vec3((vec2(c) + 0.5) / u_rasterSize * u_fullSize, 1.0)).xy - u_regionOrigin;
+          float dl = guide(q) - here;
+          float w = exp(-dot(ds, ds) / ${(2 * AI_SPATIAL_SIGMA ** 2).toFixed(4)} - dl * dl / ${(2 * AI_RANGE_SIGMA ** 2).toFixed(4)});
+          sum += w * texelFetch(u_raster, c, 0).r;
+          wsum += w;
+        }
+      v = sum / wsum;
+    }
   } else {
     vec3 lin = max(texelFetch(u_base, p, 0).rgb, 0.0);
     if (u_type == 3) {
@@ -190,3 +222,91 @@ export const COPY = () => `${HEAD}
 uniform sampler2D u_src;
 uniform ivec2 u_origin;
 void main() { outColor = texelFetch(u_src, ivec2(gl_FragCoord.xy) - u_origin, 0); }`
+
+/**
+ * Removal, step 1 (one pixel): the noise level k (σ = k·√v per channel) of the source around the
+ * area, from 192 samples on a ring — a trimmed mean of |high-pass|/√v (see masks.ts noiseLevel).
+ */
+export const NOISE_LEVEL = () => `${HEAD}
+uniform sampler2D u_img;
+uniform vec4 u_ring;   // x0, y0, x1, y1 (texture px)
+vec3 ratio(vec2 p) {
+  ivec2 m = textureSize(u_img, 0) - 2, i = clamp(ivec2(floor(p)), ivec2(1), m);
+  vec3 v = texelFetch(u_img, i, 0).rgb, n = vec3(0.0);
+  for (int y = -1; y <= 1; y++)
+    for (int x = -1; x <= 1; x++)
+      if (x != 0 || y != 0) n += texelFetch(u_img, i + ivec2(x, y), 0).rgb;
+  return abs(v - n / 8.0) / sqrt(max(v, 1e-6));
+}
+vec2 ringPoint(int k) {
+  float w = u_ring.z - u_ring.x, h = u_ring.w - u_ring.y, t = (float(k) + 0.5) / 192.0 * 2.0 * (w + h);
+  if (t < w) return vec2(u_ring.x + t, u_ring.y);
+  t -= w;
+  if (t < h) return vec2(u_ring.z, u_ring.y + t);
+  t -= h;
+  if (t < w) return vec2(u_ring.z - t, u_ring.w);
+  return vec2(u_ring.x, u_ring.w - (t - w));
+}
+void main() {
+  vec3 m1 = vec3(0.0);
+  for (int k = 0; k < 192; k++) m1 += ratio(ringPoint(k));
+  m1 /= 192.0;
+  vec3 sum = vec3(0.0), n = vec3(0.0);
+  for (int k = 0; k < 192; k++) {
+    vec3 r = ratio(ringPoint(k)), keep = step(r, 2.5 * m1);
+    sum += r * keep;
+    n += keep;
+  }
+  outColor = vec4(sum / max(n, vec3(1.0)) * 1.2533141 / 1.0606602, 1.0);
+}`
+
+/**
+ * Removal, step 2: the inpainted fill (bicubic from its own resolution) plus grain at the
+ * surroundings' noise level, blended in through the strokes' mask, over the area's bounding box.
+ */
+export const REMOVE = () => `${HEAD}${SS}
+uniform sampler2D u_img;
+uniform sampler2D u_mask;    // strokes over the bounding box
+uniform sampler2D u_level;   // 1×1 noise level
+uniform usampler2D u_fill;
+uniform ivec2 u_fillSize;
+uniform vec4 u_rect;         // the fill's rectangle in texture px: x, y, w, h
+uniform vec2 u_origin;       // bounding box origin in texture px
+uniform vec2 u_abs;          // scaled-source px of texel 0 (grain is anchored to the photo, not the tile)
+vec3 fill(ivec2 i) { return vec3(texelFetch(u_fill, clamp(i, ivec2(0), u_fillSize - 1), 0).rgb) / 65535.0; }
+vec4 cr(float t) {
+  float t2 = t * t, t3 = t2 * t;
+  return vec4(-0.5 * t3 + t2 - 0.5 * t, 1.5 * t3 - 2.5 * t2 + 1.0, -1.5 * t3 + 2.0 * t2 + 0.5 * t, 0.5 * t3 - 0.5 * t2);
+}
+float gauss(uvec2 q, uint seed) { return (hash(q + seed) + hash(q + seed + 101u) + hash(q + seed + 211u) - 1.5) * 2.0; }
+void main() {
+  vec2 p = gl_FragCoord.xy + u_origin;
+  vec4 d = texelFetch(u_img, ivec2(p), 0);
+  vec2 f = (p - u_rect.xy) / u_rect.zw;
+  float m = texelFetch(u_mask, ivec2(gl_FragCoord.xy), 0).r;
+  m *= step(0.0, f.x) * step(f.x, 1.0) * step(0.0, f.y) * step(f.y, 1.0);
+  if (m <= 0.0) { outColor = d; return; }
+  vec2 t = f * vec2(u_fillSize) - 0.5, fr = fract(t);
+  ivec2 b = ivec2(floor(t)) - 1;
+  vec4 wx = cr(fr.x), wy = cr(fr.y);
+  vec3 c = vec3(0.0);
+  for (int j = 0; j < 4; j++) {
+    vec3 row = vec3(0.0);
+    for (int i = 0; i < 4; i++) row += wx[i] * fill(b + ivec2(i, j));
+    c += wy[j] * row;
+  }
+  c = max(c, 0.0);
+  uvec2 q = uvec2(p + u_abs + 65536.0);
+  c += vec3(gauss(q, 0u), gauss(q, 7u), gauss(q, 13u)) * texelFetch(u_level, ivec2(0), 0).rgb * sqrt(c);
+  outColor = vec4(mix(d.rgb, max(c, 0.0), m), d.a);
+}`
+
+/** AI noise reduction: the source blended with its denoised copy (same window, same scale). */
+export const BLEND = () => `${HEAD}
+uniform sampler2D u_a;
+uniform sampler2D u_b;
+uniform float u_t;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  outColor = mix(texelFetch(u_a, p, 0), texelFetch(u_b, p, 0), u_t);
+}`

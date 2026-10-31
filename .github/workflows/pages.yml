@@ -41,10 +41,22 @@ jobs:
           npm ci
           npm run build
 
+      # On-device AI models are served from the site itself (no third-party
+      # requests from users' browsers). The script downloads each one from its
+      # upstream, checks its sha256, converts where the registry says so, checks
+      # the result's sha256, and writes photo/public/models/ (git-ignored).
+      - name: Cache AI model sources
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/lumen-models
+          key: lumen-models-${{ hashFiles('photo/src/ai/registry.ts') }}
+          restore-keys: lumen-models-
+
       - name: Build Lumen
         working-directory: photo
         run: |
           npm ci
+          node scripts/models/fetch.mjs --cache ~/.cache/lumen-models
           npm run build
 
       - name: Assemble site

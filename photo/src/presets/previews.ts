@@ -4,6 +4,7 @@
 // previews are kept as bitmaps, keyed by photo, look and the photo's own edits.
 
 import type { EditRecipe } from '../edit/types'
+import { supplyRasters } from '../editor/ai/supply'
 import { createEngine } from '../engine'
 import { boxReduce } from '../engine/image'
 import type { Engine, SourceColor, SourceImage } from '../engine/types'
@@ -104,6 +105,7 @@ async function renderOne(job: Job) {
     loaded = job.source.key
   }
   const recipe = job.recipe()
+  await supplyRasters(e, recipe)
   const out = e.outputSize(recipe)
   e.resize(out.width, out.height)
   e.render(recipe)

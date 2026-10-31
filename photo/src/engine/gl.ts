@@ -239,6 +239,20 @@ export class Gpu {
     return { tex, width, height }
   }
 
+  /** 8-bit single-channel texture (0…1 in the shader, texelFetch). */
+  uploadR8(data: Uint8Array, width: number, height: number): Texture {
+    const gl = this.gl
+    this.scratchUnit()
+    const tex = gl.createTexture()!
+    gl.bindTexture(gl.TEXTURE_2D, tex)
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, width, height)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1)
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RED, gl.UNSIGNED_BYTE, data)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4)
+    this.nearest()
+    return { tex, width, height }
+  }
+
   /** Float texture (sampled with texelFetch). channels: 1 → R32F, 3 → RGB32F, 4 → RGBA32F. */
   uploadFloat(data: Float32Array, width: number, height: number, channels: 1 | 3 | 4, existing?: Texture): Texture {
     const gl = this.gl

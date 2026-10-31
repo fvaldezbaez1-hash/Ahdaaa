@@ -181,10 +181,11 @@ export async function refreshThumbnails(ids: string[], onProgress?: (done: numbe
 export async function deletePhotos(ids: string[]): Promise<void> {
   if (!ids.length) return
   const gone = new Set(ids)
-  await db.transaction('rw', [db.photos, db.originals, db.thumbs, db.albums], async () => {
+  await db.transaction('rw', [db.photos, db.originals, db.thumbs, db.albums, db.rasters], async () => {
     await db.photos.bulkDelete(ids)
     await db.originals.bulkDelete(ids)
     await db.thumbs.bulkDelete(ids)
+    await db.rasters.where('photoId').anyOf(ids).delete()
     for (const a of await db.albums.filter((a) => !!a.coverId && gone.has(a.coverId)).toArray()) {
       const next = await db.photos.where('albumIds').equals(a.id).first()
       await db.albums.update(a.id, { coverId: next?.id })

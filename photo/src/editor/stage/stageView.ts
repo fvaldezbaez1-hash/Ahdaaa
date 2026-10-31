@@ -27,6 +27,8 @@ export const stageControl = {
     active = s
   },
   toggleZoom: () => active?.toggleZoom(),
+  /** Repaint (e.g. an AI result arrived for the recipe on screen). */
+  request: () => active?.request(),
   /** The photo box and the stage (CSS px), to place new masks in the visible part of the photo. */
   layout: () => (active ? { box: active.box, stage: active.stageSize() } : null),
   zoomBy: (factor: number) => active?.zoomTo(view.get().zoom * factor),

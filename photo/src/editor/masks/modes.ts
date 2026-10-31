@@ -1,9 +1,10 @@
 import { uid } from '../../io/db'
 import { editor } from '../../state/editor'
+import { spotsOf, withSpots } from '../../edit/retouch'
 import type { EditRecipe, Mask, MaskShape, RetouchSpot } from '../../edit/types'
 import { finishCrop, isCropping } from '../crop/cropTool'
 import { stageControl } from '../stage/stageView'
-import { view } from '../view'
+import { view, type HealSettings } from '../view'
 import { radiusToSize, sizeToRadius } from './brush'
 import { createLinear, createRadial } from './handles'
 import { addMask, maskLabel, MASK_KINDS, newLayer, removeMask, type MaskKind } from './model'
@@ -19,9 +20,10 @@ export function enterMasks(layerId?: string) {
   view.set({ tool: 'mask', layer: layer?.id ?? null, mask: layer?.masks[0]?.id ?? null, eyedropper: false, placing: null, rangePick: false })
 }
 
-export function enterHeal() {
+export function enterHeal(mode?: HealSettings['mode']) {
   if (isCropping()) finishCrop()
-  view.set({ tool: 'heal', eyedropper: false, placing: null, rangePick: false })
+  const heal = mode ? { ...view.get().heal, mode } : view.get().heal
+  view.set({ tool: 'heal', heal, spot: null, eyedropper: false, placing: null, rangePick: false })
 }
 
 export function exitTool() {
@@ -57,7 +59,7 @@ export function createLayer(kind: MaskKind, src: { width: number; height: number
   const r = editor.getState().recipe
   if (!r) return
   const ids = { layer: uid(), mask: uid() }
-  const layer = newLayer(r.layers, kind, defaultShape(kind, src, r), ids)
+  const layer = newLayer(r.layers, defaultShape(kind, src, r), ids)
   editor.apply((x) => ({ ...x, layers: [...x.layers, layer] }), `New ${MASK_KINDS.find((k) => k.kind === kind)!.label.toLowerCase()} mask`)
   view.set({ tool: 'mask', layer: layer.id, mask: ids.mask, placing: kind === 'linear' || kind === 'radial' ? kind : null, rangePick: kind === 'color' })
 }
@@ -84,7 +86,7 @@ export function deleteMask(layerId: string, maskId: string) {
 // ---- Healing ----
 
 export function updateSpots(fn: (spots: RetouchSpot[]) => RetouchSpot[], label: string) {
-  editor.apply((r) => ({ ...r, retouch: fn(r.retouch) }), label)
+  editor.apply((r) => ({ ...r, retouch: withSpots(r.retouch, fn(spotsOf(r.retouch))) }), label)
 }
 
 export function deleteSpot(id: string | null) {
@@ -97,7 +99,7 @@ export function deleteSpot(id: string | null) {
 export function nudgeSize(dir: 1 | -1) {
   const v = view.get()
   if (v.tool === 'heal') {
-    const spot = editor.getState().recipe?.retouch.find((s) => s.id === v.spot)
+    const spot = spotsOf(editor.getState().recipe?.retouch).find((s) => s.id === v.spot)
     const size = Math.min(100, Math.max(1, (spot ? radiusToSize(spot.r) : v.heal.size) + dir * 5))
     view.set({ heal: { ...v.heal, size } })
     if (spot) updateSpots((spots) => spots.map((s) => (s.id === spot.id ? { ...s, r: sizeToRadius(size) } : s)), 'Heal spot size')

@@ -1,4 +1,4 @@
-import type { MaskShape, RetouchSpot } from '../../edit/types'
+import type { MaskShape, RemoveArea, RetouchSpot } from '../../edit/types'
 import { dist, screenAngle, sourceAngle, type Pt, type Space } from './space'
 
 // Where the on-photo handles of a mask or healing spot are, which one a
@@ -181,4 +181,15 @@ export function dragSpot(sp: RetouchSpot, s: Space, part: SpotPart, from: Pt, to
   const at = part === 'target' ? { x: sp.x, y: sp.y } : { x: sp.sx, y: sp.sy }
   const n = s.toMask(add(s.toPx(at), sub(to, from)))
   return part === 'target' ? { ...sp, x: n.x, y: n.y } : { ...sp, sx: n.x, sy: n.y }
+}
+
+// ---- AI removals ----
+
+/** Where a removal's pin sits: the middle of its area. */
+export const removalPin = (a: RemoveArea, s: Space): Pt => s.toPx({ x: a.rect.x + a.rect.w / 2, y: a.rect.y + a.rect.h / 2 })
+
+/** The removal (newest first) whose pin is within `reach` px of p. */
+export function hitRemoval(areas: RemoveArea[], s: Space, p: Pt, reach: number): string | null {
+  for (let i = areas.length - 1; i >= 0; i--) if (dist(removalPin(areas[i], s), p) <= reach) return areas[i].id
+  return null
 }

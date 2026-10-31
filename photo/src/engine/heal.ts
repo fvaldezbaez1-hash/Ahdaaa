@@ -1,7 +1,7 @@
 // Healing on the CPU side: where to take a patch from (findHealSource) and which
 // part of the source a window of the image needs once spots copy pixels around.
 
-import type { RetouchSpot } from '../edit/types'
+import type { Retouch, RetouchSpot } from '../edit/types'
 import type { SourceImage } from './types'
 
 /** Bilinear sample of a Uint16 RGB image (0…1), clamped to the edges. */
@@ -84,27 +84,38 @@ export function findHealSource(img: SourceImage, spots: RetouchSpot[], x: number
   return best
 }
 
+/** Margin (source px) around a removal's rectangle (w × h source px) where its grain level is measured. */
+export const removalRing = (w: number, h: number) => Math.max(4, 0.12 * Math.max(w, h))
+
 /**
- * Grow a source-pixel window so it holds everything the spots inside it copy from
- * (and what those sources were healed from, and so on): tiles then heal like the whole image.
+ * Grow a source-pixel window so it holds everything the retouching inside it reads: the circles
+ * spots copy from (and what those were healed from, and so on), and a removal's whole area with
+ * the ring its grain level is measured on. Tiles then retouch exactly like the whole image.
  */
-export function retouchWindow(spots: RetouchSpot[], W: number, H: number, win: { x0: number; y0: number; x1: number; y1: number }) {
+export function retouchWindow(items: readonly Retouch[], W: number, H: number, win: { x0: number; y0: number; x1: number; y1: number }) {
   const L = Math.max(W, H)
   const w = { ...win }
+  const grow = (n: { x0: number; y0: number; x1: number; y1: number }) => {
+    if (n.x0 >= w.x0 && n.y0 >= w.y0 && n.x1 <= w.x1 && n.y1 <= w.y1) return false
+    Object.assign(w, { x0: Math.min(w.x0, n.x0), y0: Math.min(w.y0, n.y0), x1: Math.max(w.x1, n.x1), y1: Math.max(w.y1, n.y1) })
+    return true
+  }
   // A spot reads its source circle and a ring around both circles (heal matching).
   const reach = (s: RetouchSpot) => s.r * L * 1.35 + 3
-  for (let pass = 0; pass <= spots.length; pass++) {
+  for (let pass = 0; pass <= items.length; pass++) {
     let grew = false
-    for (const s of spots) {
+    for (const s of items) {
+      if (s.mode === 'remove') {
+        const rw = s.rect.w * W, rh = s.rect.h * H, e = removalRing(rw, rh) + 4
+        const r = { x0: s.rect.x * W - e, y0: s.rect.y * H - e, x1: s.rect.x * W + rw + e, y1: s.rect.y * H + rh + e }
+        if (r.x1 >= w.x0 && r.x0 <= w.x1 && r.y1 >= w.y0 && r.y0 <= w.y1 && grow(r)) grew = true
+        continue
+      }
       const e = reach(s)
       const dx = s.x * W, dy = s.y * H
       if (dx + e < w.x0 || dx - e > w.x1 || dy + e < w.y0 || dy - e > w.y1) continue
       const sx = s.sx * W, sy = s.sy * H
-      const n = { x0: Math.min(w.x0, sx - e, dx - e), y0: Math.min(w.y0, sy - e, dy - e), x1: Math.max(w.x1, sx + e, dx + e), y1: Math.max(w.y1, sy + e, dy + e) }
-      if (n.x0 < w.x0 || n.y0 < w.y0 || n.x1 > w.x1 || n.y1 > w.y1) {
-        Object.assign(w, n)
-        grew = true
-      }
+      if (grow({ x0: Math.min(sx, dx) - e, y0: Math.min(sy, dy) - e, x1: Math.max(sx, dx) + e, y1: Math.max(sy, dy) + e })) grew = true
     }
     if (!grew) break
   }

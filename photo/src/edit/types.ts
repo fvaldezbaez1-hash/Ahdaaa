@@ -154,16 +154,33 @@ export type MaskShape =
   | { type: 'linear'; x1: number; y1: number; x2: number; y2: number }
   /** Ellipse at (cx, cy), radii rx/ry, rotated `angle` degrees; feather 0…100 = soft edge width as % of the radius. */
   | { type: 'radial'; cx: number; cy: number; rx: number; ry: number; angle: number; feather: number }
-  /** Painted strokes; r = brush radius, feather 0…100 = soft part of r (%), flow 0…1 per dab; `erase` strokes remove. */
-  | { type: 'brush'; strokes: { points: { x: number; y: number }[]; r: number; feather: number; flow: number; erase?: boolean }[] }
-  /** Phase 3 (on-device AI). Not rendered yet. */
-  | { type: 'ai'; target: 'sky' | 'subject' | 'background' | 'person' }
+  /** Painted strokes (see BrushStroke). */
+  | { type: 'brush'; strokes: BrushStroke[] }
+  /**
+   * Phase 3: a selection made by an on-device AI model. The model runs once; its result is a
+   * stored mask image (`raster`, an id in the io rasters store, normalized to the whole source)
+   * that the engine refines edge-aware at render resolution. `raster` is '' until computed.
+   * person: `parts` picks classes (all when omitted). object: `points` are the user's clicks.
+   */
+  | { type: 'ai'; target: AiTarget; parts?: PersonPart[]; points?: { x: number; y: number; positive: boolean }[]; raster: string; model: string }
   /**
    * Select by brightness or color of the photo as developed before local layers.
    * luminance: low/high 0…100 (display-encoded), smooth 0…100 = feathering of both ends.
    * color: hue 0…360 and sat 0…100 of the sampled color, `low…high` = tolerance 0…100 (high used as the width), smooth 0…100.
    */
   | { type: 'range'; range: 'luminance' | 'color'; low: number; high: number; smooth: number; hue?: number; sat?: number }
+
+/** One brush stroke: r = brush radius, feather 0…100 = soft part of r (%), flow 0…1 per dab; `erase` removes. */
+export interface BrushStroke {
+  points: { x: number; y: number }[]
+  r: number
+  feather: number
+  flow: number
+  erase?: boolean
+}
+
+export type AiTarget = 'subject' | 'sky' | 'background' | 'person' | 'object'
+export type PersonPart = 'face' | 'body' | 'hair' | 'clothes' | 'accessories'
 
 /** How a mask combines with the ones before it in the layer (the first one is always `add`). */
 export type MaskMode = 'add' | 'subtract' | 'intersect'
@@ -225,6 +242,33 @@ export interface RetouchSpot {
   opacity: number
 }
 
+/**
+ * Phase 3: AI object removal. The painted area is filled by an inpainting model once; the fill
+ * is a stored image (`fill`, an id in the io rasters store, linear RGB in the source's color
+ * space) covering `rect` (mask coordinates) and blended in through the strokes. '' until computed.
+ */
+export interface RemoveArea {
+  id: string
+  mode: 'remove'
+  strokes: BrushStroke[]
+  rect: Rect
+  fill: string
+  model: string
+}
+
+export type Retouch = RetouchSpot | RemoveArea
+
+/**
+ * Phase 3: AI noise reduction. A denoised full-resolution copy of the source is made once and
+ * stored (`raster`, an id in the io rasters store); `amount` blends it with the original.
+ */
+export interface AiDenoise {
+  /** 0…100. */
+  amount: number
+  raster: string
+  model: string
+}
+
 export type Variation = 'original' | 'warmer' | 'cooler' | 'softer' | 'stronger'
 
 /** A recipe value a look changed, keyed by its path (see edit/path.ts). */
@@ -258,8 +302,10 @@ export interface EditRecipe {
   detail: Detail
   effects: Effects
   geometry: Geometry
-  /** Healing / clone spots, applied first (to the photo itself). */
-  retouch: RetouchSpot[]
+  /** Healing / clone spots and AI removals, applied in order first (to the photo itself). */
+  retouch: Retouch[]
+  /** AI noise reduction (Phase 3); applies before everything else. */
+  denoise?: AiDenoise
   layers: LocalLayer[]
   look?: AppliedLook
 }

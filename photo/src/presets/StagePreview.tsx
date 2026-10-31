@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EditRecipe } from '../edit/types'
+import { supplyRasters } from '../editor/ai/supply'
 import { createEngine } from '../engine'
 import type { Engine } from '../engine/types'
 import { Spinner } from '../ui/controls'
@@ -51,12 +52,20 @@ export function StagePreview({ source, recipe, before, fallback }: { source: Pre
   useEffect(() => {
     const e = engine.current
     if (!e || !source || !shown || !size.w || !size.h) return
-    const raf = requestAnimationFrame(() => {
-      const dpr = Math.min(2, window.devicePixelRatio || 1)
-      e.resize(size.w * dpr, size.h * dpr)
-      e.render(shown)
+    let raf = 0
+    let live = true
+    void supplyRasters(e, shown).then(() => {
+      if (!live) return
+      raf = requestAnimationFrame(() => {
+        const dpr = Math.min(2, window.devicePixelRatio || 1)
+        e.resize(size.w * dpr, size.h * dpr)
+        e.render(shown)
+      })
     })
-    return () => cancelAnimationFrame(raf)
+    return () => {
+      live = false
+      cancelAnimationFrame(raf)
+    }
   }, [source, shown, size])
 
   const press = (on: boolean) => () => setHold(on)

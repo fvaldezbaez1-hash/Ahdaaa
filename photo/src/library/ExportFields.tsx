@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { UpscaleField } from '../editor/ai/UpscaleField'
 import type { ExportOptions } from '../io/types'
 import { Field, Segmented, Toggle } from '../ui/controls'
 import { Slider } from '../ui/Slider'
@@ -83,6 +84,7 @@ export function ExportFields({
           />
         </Field>
       )}
+      <UpscaleField value={value} onChange={set} fullSize={fullSize} />
       <div className="field">
         <span>Color space</span>
         <Segmented label="Color space" value={value.colorSpace} options={COLOR_SPACES} onChange={(colorSpace) => set({ colorSpace })} />

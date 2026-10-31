@@ -2,12 +2,13 @@
 // (cached per layer, rebuilt only when that layer's masks change), and the
 // per-pixel sum of what the layers add to the sliders (4 RGBA targets).
 
-import type { LocalLayer, Mask } from '../edit/types'
+import type { BrushStroke, LocalLayer, Mask } from '../edit/types'
 import { applyAffine, invertAffine, type Affine, type Size } from './geometry'
 import type { Gpu, Target } from './gl'
 import { LAYERS_PER_PASS, LOCAL, MASK, SEGMENT_FRAG, SEGMENT_VERT, STROKE } from './localShaders'
 import { drawableMasks, layerVector } from './masks'
 import type { Rect, StageCache } from './pipeline'
+import type { Rasters } from './rasters'
 
 export interface MaskFrame {
   region: Rect
@@ -15,6 +16,10 @@ export interface MaskFrame {
   toSource: Affine
   fullSize: Size
   outLuma: number[]
+  /** AI masks: their rasters, and the photo (source primaries) with its luminance weights as the edge guide. */
+  rasters?: Rasters
+  scene?: Stage
+  luma?: number[]
 }
 
 interface Stage {
@@ -42,7 +47,8 @@ export function layerMasks(gpu: Gpu, cache: StageCache, f: MaskFrame, layers: Lo
   for (const layer of layers) {
     const masks = drawableMasks(layer.masks)
     const usesBase = masks.some((m) => m.type === 'range')
-    const key = JSON.stringify([keyOf(layer.masks), f.region, f.toSource, f.fullSize, usesBase ? base?.version : 0])
+    const ai = masks.flatMap((m) => (m.type === 'ai' ? [f.rasters?.version(m.raster) ?? 0] : []))
+    const key = JSON.stringify([keyOf(layer.masks), f.region, f.toSource, f.fullSize, usesBase ? base?.version : 0, ai, ai.length ? f.scene?.version : 0])
     out.set(layer.id, cache.run('mask:' + layer.id, key, f.region.w, f.region.h, 'r16f', false, (t) => drawMasks(gpu, f, masks, base?.target ?? null, t)))
   }
   cache.prune('mask:', new Set(layers.map((l) => 'mask:' + l.id)))
@@ -57,14 +63,22 @@ function drawMasks(gpu: Gpu, f: MaskFrame, masks: Mask[], base: Target | null, o
   let prev: Target | null = null
   masks.forEach((mask, i) => {
     const dst = i === masks.length - 1 ? out : gpu.target(W, H, 'r16f')
-    const brush = mask.type === 'brush' ? rasterizeBrush(gpu, f, mask, W, H) : null
+    const brush = mask.type === 'brush' ? rasterizeBrush(gpu, f, mask.strokes, W, H) : null
+    const raster = mask.type === 'ai' ? (f.rasters?.texture(mask.raster) ?? null) : null
     const p = gpu.program('mask', MASK)
     p.tex('u_prev', prev ?? gpu.dummy(), 0).tex('u_brush', brush ?? gpu.dummy(), 1).tex('u_base', base ?? gpu.dummy(), 2)
+      .tex('u_raster', raster && raster.img.channels === 1 ? raster.tex : gpu.dummy(), 3).tex('u_scene', f.scene?.target ?? gpu.dummy(), 4)
       .b('u_first', i === 0).i('u_mode', MODES[mask.mode] ?? 0).b('u_invert', mask.invert)
       .m3('u_toSource', [m[0], m[1], m[2], m[3], m[4], m[5], 0, 0, 1]).f('u_regionOrigin', f.region.x, f.region.y).f('u_px', px).f('u_outLuma', f.outLuma[0], f.outLuma[1], f.outLuma[2])
     if (mask.type === 'linear') p.i('u_type', 0).f('u_a', mask.x1 * SW, mask.y1 * SH, mask.x2 * SW, mask.y2 * SH)
     else if (mask.type === 'radial') p.i('u_type', 1).f('u_a', mask.cx * SW, mask.cy * SH, Math.max(1e-6, mask.rx * L), Math.max(1e-6, mask.ry * L)).f('u_b', (mask.angle * Math.PI) / 180, mask.feather / 100, 0, 0)
     else if (mask.type === 'brush') p.i('u_type', 2)
+    else if (mask.type === 'ai') {
+      const fs = invertAffine(m)
+      p.i('u_type', 5).b('u_hasRaster', !!raster && raster.img.channels === 1).f('u_rasterSize', raster?.img.width ?? 1, raster?.img.height ?? 1)
+        .f('u_luma', ...((f.luma ?? [0.2627, 0.678, 0.0593]) as [number, number, number])).m3('u_fromSource', [fs[0], fs[1], fs[2], fs[3], fs[4], fs[5], 0, 0, 1])
+        .f('u_fullSize', SW, SH)
+    }
     else if (mask.type === 'range' && mask.range === 'color') p.i('u_type', 4).f('u_a', ((mask.hue ?? 0) * Math.PI) / 180, (mask.sat ?? 0) / 100, mask.high / 100, mask.smooth / 100)
     else if (mask.type === 'range') p.i('u_type', 3).f('u_a', mask.low / 100, mask.high / 100, mask.smooth / 100, 0)
     gpu.draw(dst)
@@ -77,9 +91,9 @@ function drawMasks(gpu: Gpu, f: MaskFrame, masks: Mask[], base: Target | null, o
 /**
  * Brush strokes as capsules in region pixels (exact distance, so any resolution and any tile
  * agrees). A stroke is the union (max) of its segments at `flow`; strokes build up (screen)
- * or erase (× 1 − s) in order.
+ * or erase (× 1 − s) in order. Also draws AI-removal areas.
  */
-function rasterizeBrush(gpu: Gpu, f: MaskFrame, mask: Extract<Mask, { type: 'brush' }>, W: number, H: number): Target {
+export function rasterizeBrush(gpu: Gpu, f: Pick<MaskFrame, 'region' | 'toSource' | 'fullSize'>, strokes: BrushStroke[], W: number, H: number): Target {
   const acc = gpu.target(W, H, 'r16f')
   gpu.clear(acc)
   const inv = invertAffine(f.toSource)
@@ -87,7 +101,7 @@ function rasterizeBrush(gpu: Gpu, f: MaskFrame, mask: Extract<Mask, { type: 'bru
   const px = Math.sqrt(Math.abs(f.toSource[0] * f.toSource[4] - f.toSource[1] * f.toSource[3]))
   const segs: number[] = []
   const draws: { start: number; count: number; r: number; inner: number; flow: number; erase: boolean; box: number[] }[] = []
-  for (const s of mask.strokes) {
+  for (const s of strokes) {
     const r = (s.r * L) / px
     if (!(r > 0.05) || !s.points.length || s.flow <= 0) continue
     const pts = s.points.map((q) => {
