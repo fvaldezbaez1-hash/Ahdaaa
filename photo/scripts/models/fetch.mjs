@@ -31,8 +31,25 @@ const ALLOW_MISSING = args.includes('--allow-missing')
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const mb = (n) => `${(n / 1e6).toFixed(1)} MB`
 
+const ATTEMPTS = 4
+
+/** Download with retries: release hosts drop connections now and then, and one blip shouldn't fail the deploy. */
 async function download(url, expect) {
-  const res = await fetch(url, { redirect: 'follow' })
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await downloadOnce(url, expect)
+    } catch (e) {
+      // A missing file won't appear on retry; anything else (resets, timeouts, truncation) might.
+      if (attempt >= ATTEMPTS || /^HTTP 404/.test(e.message)) throw e
+      const wait = 2 ** attempt * 1000
+      console.log(`retry ${url} in ${wait / 1000} s (${e.message})`)
+      await new Promise((r) => setTimeout(r, wait))
+    }
+  }
+}
+
+async function downloadOnce(url, expect) {
+  const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10 * 60_000) })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const bytes = new Uint8Array(await res.arrayBuffer())
   if (bytes.length !== expect.bytes) throw new Error(`size ${bytes.length}, expected ${expect.bytes}`)
