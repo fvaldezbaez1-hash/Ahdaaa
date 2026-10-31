@@ -137,9 +137,114 @@ export interface Geometry {
   flipH: boolean
   flipV: boolean
   aspect: AspectId
+  /** Phase 4: lens distortion correction, applied to the source before everything else. Absent = none. */
+  lens?: LensGeometry
+  /** Phase 4: perspective (Upright / Transform), after quarter turns and flips, before straighten and crop. Absent = none. */
+  perspective?: Perspective
+}
+
+/**
+ * Phase 4: distortion correction. `profile` holds coefficients resolved from the lens database for
+ * this photo (lensfun models; radius normalized to half the source's shorter side, as lensfun does),
+ * so rendering never needs the database.
+ */
+export interface LensGeometry {
+  profile: { model: 'poly3' | 'poly5' | 'ptlens'; k: number[]; amount: number } | null
+  /** Manual distortion −100…+100 (+ fixes barrel, − fixes pincushion). */
+  manual: number
+}
+
+/** A line the user drew that should end up vertical or horizontal (Guided Upright), in mask coordinates. */
+export interface UprightGuide {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+/** Phase 4: perspective correction. All sliders are 0 at "no change" except scale (100). */
+export interface Perspective {
+  /** −100…+100: keystone (vertical lines converge / diverge). */
+  vertical: number
+  horizontal: number
+  /** −10…+10 degrees, fine rotation applied with the perspective. */
+  rotate: number
+  /** −100…+100: stretch vertically (+) or horizontally (−) to undo the squash keystoning causes. */
+  aspect: number
+  /** 50…150 %. */
+  scale: number
+  /** −100…+100 % of the frame. */
+  offsetX: number
+  offsetY: number
+  /** Which Upright mode set these values ('manual' once sliders are moved). */
+  mode: 'off' | 'auto' | 'level' | 'vertical' | 'full' | 'guided' | 'manual'
+  guides: UprightGuide[]
 }
 
 export type Treatment = 'color' | 'bw'
+
+/** Phase 4: Levels on display-encoded values, 0…255 like Photoshop and Capture One. */
+export interface LevelsChannel {
+  inBlack: number
+  inWhite: number
+  /** Midtone gamma 0.1…10; 1 = no change, > 1 brightens. */
+  gamma: number
+  outBlack: number
+  outWhite: number
+}
+
+export interface Levels {
+  rgb: LevelsChannel
+  r: LevelsChannel
+  g: LevelsChannel
+  b: LevelsChannel
+}
+
+/**
+ * Phase 4: one range of the advanced color editor (Capture One style), selected on a
+ * hue / saturation wheel around a picked color and shifted. With `uniformity` it's a
+ * Skin Tone range: colors inside are pulled toward the picked color.
+ */
+export interface ColorRange {
+  id: string
+  name: string
+  enabled: boolean
+  /** Picked color: hue 0…360, saturation 0…100. */
+  hue: number
+  sat: number
+  /** Half-width of the hue slice, 1…90 degrees. */
+  hueWidth: number
+  /** Saturation bounds of the slice, 0…100. */
+  satLow: number
+  satHigh: number
+  /** 0…100: soft edge of the slice. */
+  smooth: number
+  /** −30…+30 degrees. */
+  hueShift: number
+  /** −100…+100. */
+  satShift: number
+  lightShift: number
+  /** Skin Tone: 0…100 pull toward the picked hue / saturation / lightness. */
+  uniformity?: { hue: number; sat: number; light: number }
+}
+
+/** Phase 4: lens corrections that aren't geometry (see Geometry.lens for distortion). */
+export interface LensCorrection {
+  /** Use the lens profile; `profileId` names it ('' = none found / not chosen). */
+  enabled: boolean
+  profileId: string
+  /** Resolved profile vignetting (lensfun "pa" model k1…k3) and amount 0…200 %. */
+  vignetting: { k: [number, number, number]; amount: number } | null
+  /** Resolved profile lateral chromatic aberration (lensfun poly3 per channel: red, blue). */
+  tca: { r: [number, number, number]; b: [number, number, number] } | null
+  /** Detect and remove lateral chromatic aberration from the image itself. */
+  autoCA: boolean
+  /** Manual lens vignetting compensation −100…+100 and its midpoint 0…100. */
+  manualVignetting: number
+  manualVignettingMidpoint: number
+  /** Defringe (axial / purple and green fringes): amount 0…20 and hue ranges in degrees. */
+  defringe: { purple: number; purpleHue: [number, number]; green: number; greenHue: [number, number] }
+}
 
 /**
  * Mask coordinates (Phase 2): positions are normalized to the SOURCE image as
@@ -297,10 +402,16 @@ export interface EditRecipe {
   wb: WhiteBalance
   basic: Basic
   curve: ToneCurve
+  /** Phase 4. */
+  levels: Levels
   mixer: Mixer
+  /** Phase 4: advanced color editor ranges, applied in order after the mixer. */
+  colorEditor: ColorRange[]
   grading: Grading
   detail: Detail
   effects: Effects
+  /** Phase 4. */
+  lens: LensCorrection
   geometry: Geometry
   /** Healing / clone spots and AI removals, applied in order first (to the photo itself). */
   retouch: Retouch[]
