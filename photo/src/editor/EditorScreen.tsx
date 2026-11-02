@@ -8,6 +8,7 @@ import { useIsPhone } from '../ui/hooks'
 import { finishCrop, isCropping } from './crop/cropTool'
 import { DesktopEditor } from './desktop/DesktopEditor'
 import { useRasterSync } from './ai/rasterSync'
+import { useLensSync } from './lens/lensSync'
 import { usePersistence } from './persistence'
 import { PhoneEditor } from './phone/PhoneEditor'
 import { usePhotoOrder } from './photos'
@@ -58,6 +59,7 @@ export function EditorScreen({ id }: { id: string }) {
   const fileName = useLiveQuery(() => db.photos.get(id).then((p) => p?.fileName), [id])
   usePersistence(id, !!session)
   useRasterSync(session)
+  useLensSync(session)
   useEditorShortcuts(session, order)
   // Leaving mid-crop keeps the crop (like switching tools).
   useEffect(() => () => void (isCropping() && finishCrop()), [id])

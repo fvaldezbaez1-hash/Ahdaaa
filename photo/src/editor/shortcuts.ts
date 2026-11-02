@@ -20,11 +20,12 @@ export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: 'Y', action: 'Split before | after' },
   { keys: 'C', action: 'Crop & straighten' },
   { keys: '[ / ]', action: 'Rotate left / right 90° (brush or spot size while masking or healing)' },
-  { keys: 'Enter / Esc', action: 'Apply / cancel the crop; leave masking or healing' },
+  { keys: 'Enter / Esc', action: 'Apply / cancel the crop; leave masking, healing or Guided Upright; cancel a color picker' },
   { keys: 'M', action: 'Masks' },
   { keys: 'O', action: 'Show the mask overlay' },
   { keys: 'Q', action: 'Heal & clone' },
   { keys: '⇧Q', action: 'Remove objects (AI)' },
+  { keys: '⇧T', action: 'Guided Upright: draw lines that should be straight' },
   { keys: 'Alt + paint', action: 'Erase from a brush mask' },
   { keys: 'Space + drag', action: 'Move the photo while masking or healing' },
   { keys: 'Backspace', action: 'Delete the selected heal spot or mask' },
@@ -82,13 +83,15 @@ export function useEditorShortcuts(session: Session | null, order: StripItem[] |
       const tool = v.tool === 'mask' || v.tool === 'heal'
       if (key === 'Escape') {
         if (v.eyedropper) return run(() => view.set({ eyedropper: false }))
+        if (v.pick) return run(() => view.set({ pick: null }))
         if (v.leveling) return run(() => view.set({ leveling: false }))
         if (cropping) return run(cancelCrop)
         if (v.rangePick || v.placing) return run(() => view.set({ rangePick: false, placing: null }))
-        if (tool) return run(exitTool)
+        if (tool || v.tool === 'guides') return run(exitTool)
         return
       }
       if (cropping && key === 'Enter') return run(finishCrop)
+      if (v.tool === 'guides' && key === 'Enter') return run(exitTool)
       if (tool && key === 'Enter') return run(exitTool)
       if (tool && (key === '[' || key === ']')) return run(() => nudgeSize(key === ']' ? 1 : -1))
       if (tool && (key === 'Backspace' || key === 'Delete')) {
@@ -122,6 +125,13 @@ export function useEditorShortcuts(session: Session | null, order: StripItem[] |
           // Shift+Q: AI Remove; Q: heal & clone.
           if (e.shiftKey) return run(() => (v.tool === 'heal' && v.heal.mode === 'remove' ? exitTool() : enterHeal('remove')))
           return run(() => (v.tool === 'heal' && v.heal.mode !== 'remove' ? exitTool() : enterHeal(v.heal.mode === 'remove' ? 'heal' : undefined)))
+        case 't':
+        case 'T':
+          if (!e.shiftKey) return
+          return run(() => {
+            if (cropping) finishCrop()
+            view.set({ tool: v.tool === 'guides' ? null : 'guides', pick: null, placing: null, rangePick: false })
+          })
         case 'o':
         case 'O':
           return run(() => view.set({ overlay: !v.overlay }))

@@ -7,7 +7,9 @@ import { useSession } from '../session'
 import { useView, view } from '../view'
 import { useEditor } from '../../state/editor'
 import { AiStageChip } from '../ai/AiJobCard'
+import { applyPick, PICK_HINTS } from '../color/pickers'
 import { ToolHint } from '../masks/ToolHint'
+import { GuidesOverlay } from '../transform/GuidesOverlay'
 import { ToolOverlay } from '../masks/ToolOverlay'
 import { isTyping } from '../../ui/hooks'
 import { CompareOverlay } from './CompareOverlay'
@@ -31,7 +33,7 @@ interface Gesture {
   space: boolean
 }
 
-const photoTool = (t: string | null) => t === 'mask' || t === 'heal'
+const photoTool = (t: string | null) => t === 'mask' || t === 'heal' || t === 'guides'
 
 /**
  * The photo. Press and hold to compare with the original, pinch / Ctrl+wheel
@@ -45,6 +47,8 @@ export function Stage({ pad }: { pad: number }) {
   const g = useRef<Gesture>({ pointers: new Map(), panning: false, tool: false, space: false })
   const tool = useView((s) => s.tool)
   const eyedropper = useView((s) => s.eyedropper)
+  const pick = useView((s) => s.pick)
+  const grid = useView((s) => s.guideGrid)
   const holding = useView((s) => s.holding)
   const mode = useView((s) => s.mode)
   const zoom = useView((s) => s.zoom)
@@ -110,6 +114,15 @@ export function Stage({ pad }: { pad: number }) {
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     const v = view.get()
     if (v.tool === 'crop' || e.button > 0) return
+    if (v.pick) {
+      const r = (session.engine.canvas as HTMLCanvasElement).getBoundingClientRect()
+      const nx = (e.clientX - r.left) / r.width, ny = (e.clientY - r.top) / r.height
+      const kind = v.pick
+      view.set({ pick: null })
+      const rgb = nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1 ? session.engine.samplePixel(nx, ny, 3, { developed: true }) : null
+      if (rgb) applyPick(kind, rgb)
+      return
+    }
     if (v.eyedropper) {
       const r = (session.engine.canvas as HTMLCanvasElement).getBoundingClientRect()
       const nx = (e.clientX - r.left) / r.width, ny = (e.clientY - r.top) / r.height
@@ -188,7 +201,7 @@ export function Stage({ pad }: { pad: number }) {
     st.panning = false
   }
 
-  const cls = ['ed-stage', eyedropper && 'picking', zoom !== 1 && 'zoomed', tool === 'crop' && 'cropping', photoTool(tool) && `tool-${tool}`].filter(Boolean).join(' ')
+  const cls = ['ed-stage', (eyedropper || pick) && 'picking', zoom !== 1 && 'zoomed', tool === 'crop' && 'cropping', photoTool(tool) && `tool-${tool}`].filter(Boolean).join(' ')
   return (
     <div
       ref={stageRef}
@@ -201,7 +214,8 @@ export function Stage({ pad }: { pad: number }) {
       onDoubleClick={(e) => !view.get().tool && !view.get().eyedropper && sv.current?.toggleZoom(local(e).x, local(e).y)}
     >
       <div ref={photoRef} className="ed-photo">
-        {tool === 'crop' ? <CropOverlay /> : photoTool(tool) ? <ToolOverlay /> : <CompareOverlay />}
+        {tool === 'crop' ? <CropOverlay /> : tool === 'guides' ? <GuidesOverlay /> : photoTool(tool) ? <ToolOverlay /> : <CompareOverlay />}
+        {(grid || tool === 'guides') && <div className="ed-grid" aria-hidden="true" />}
       </div>
       {(holding || mode === 'before') && !tool && <span className="ed-badge">Original</span>}
       {denoised && !holding && mode !== 'before' && (
@@ -211,6 +225,11 @@ export function Stage({ pad }: { pad: number }) {
       )}
       <AiStageChip />
       {photoTool(tool) && <ToolHint />}
+      {pick && (
+        <div className="ed-stage-hint" role="status">
+          <Icon name="eyedropper" size={15} /> {PICK_HINTS[pick]} · Esc to cancel
+        </div>
+      )}
       {eyedropper && (
         <div className="ed-stage-hint" role="status">
           <Icon name="eyedropper" size={15} /> Click something that should be neutral gray or white · Esc to cancel

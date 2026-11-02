@@ -8,7 +8,10 @@ import type { MaskKind } from './masks/model'
 // panels) but that isn't part of the photo's recipe. The stage subscribes
 // directly so changes repaint without re-rendering React.
 
-export type Tool = 'crop' | 'mask' | 'heal' | null
+export type Tool = 'crop' | 'mask' | 'heal' | 'guides' | null
+
+/** What a click on the photo samples (besides the white balance picker): a color editor range, a Levels point, a fringe color. */
+export type PickKind = 'color' | 'colorAgain' | 'skin' | 'black' | 'gray' | 'white' | 'fringe'
 
 export interface BrushSettings {
   /** 0…100, see masks/brush.ts sizeToRadius. */
@@ -71,12 +74,19 @@ export interface ViewState {
   removing: BrushStroke[] | null
   /** Select object: clicks leave parts out (what Alt-click does, for touch screens). */
   exclude: boolean
+  pick: PickKind | null
+  /** Color editor: the selected range. */
+  colorRange: string | null
+  /** A grid over the photo while perspective sliders move. */
+  guideGrid: boolean
+  /** Transform: zoom in so no empty corners show. */
+  constrain: boolean
 }
 
 const initial: ViewState = {
   mode: 'after', split: 0.5, holding: false, clipping: false, tool: null, eyedropper: false, leveling: false, grid: 'none', zoom: 1, zoom100: 1, histogram: null,
   sheet: null, ai: false, leftPanel: { wide: true, narrow: false },
-  layer: null, mask: null, overlay: true, placing: null, rangePick: false, spot: null, removing: null, exclude: false,
+  layer: null, mask: null, overlay: true, placing: null, rangePick: false, spot: null, removing: null, exclude: false, pick: null, colorRange: null, guideGrid: false, constrain: false,
   brush: { size: 50, feather: 50, flow: 100, erase: false },
   heal: { size: 40, feather: 50, opacity: 100, mode: 'heal' },
 }
@@ -95,8 +105,8 @@ export const view = {
   },
   /** Fresh state for a newly opened photo (keeps the compare mode, clipping, panel and brush choices). */
   reset() {
-    const { split, clipping, ai, leftPanel, overlay, brush, heal } = state
-    view.set({ ...initial, mode: state.mode === 'before' ? 'after' : state.mode, split, clipping, ai, leftPanel, overlay, brush, heal })
+    const { split, clipping, ai, leftPanel, overlay, brush, heal, constrain } = state
+    view.set({ ...initial, mode: state.mode === 'before' ? 'after' : state.mode, split, clipping, ai, leftPanel, overlay, brush, heal, constrain })
   },
   subscribe(fn: () => void) {
     listeners.add(fn)
