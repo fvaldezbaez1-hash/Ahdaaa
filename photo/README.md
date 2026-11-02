@@ -35,12 +35,25 @@ Once it's installed, Lumen works offline.
   edge-aware tone engine recovers highlights and lifts shadows without halos.
 - **Presence:** texture, clarity, dehaze, vibrance and saturation.
 - **Tone curve:** point curves for luminance and for each RGB channel.
+- **Levels:** input black, midtone and white plus output black and white, per
+  channel, over a histogram, with Auto and black / gray / white point pickers.
 - **Color mixer:** hue, saturation and luminance for 8 color bands, plus a
   black-and-white mix.
+- **Color editor** (Capture One style): pick any color on the photo, shape its
+  slice on a hue / saturation wheel, and shift its hue, saturation and
+  lightness. **Skin tone** mode evens out skin by pulling it toward the picked
+  tone.
 - **Color grading:** shadows, midtones, highlights and global, with blending and balance.
 - **Detail:** sharpening (radius, detail, masking) and luminance and color noise reduction.
 - **Effects:** vignette and film grain.
 - **Crop and straighten:** aspect presets, a level tool, rotate and flip.
+- **Lens corrections:** automatic profiles for 1,500+ lenses (distortion,
+  chromatic aberration, vignetting) found from the photo's camera data, or pick
+  the lens yourself; manual distortion and vignetting; defringe for purple and
+  green fringes.
+- **Transform / Upright:** Auto, Level, Vertical, Full, or Guided (draw up to 4
+  lines that should be straight), plus vertical, horizontal, rotate, aspect,
+  scale and offset sliders. Masks and spots stay on the content.
 - Seven profiles (Lumen Color, Neutral, Vivid, Portrait, Landscape and more).
 - Before/after (press and hold, split view, or before only), clipping warnings, a live
   histogram, unlimited undo and true 100 % zoom from the full-resolution file.
@@ -90,9 +103,9 @@ Once it's installed, Lumen works offline.
 - Resize on export. It renders in tiles, so full-size exports work even on phones.
 - Save to Files or Downloads, or share straight to other apps.
 
-**Coming next:** a Capture One–style color editor, lens corrections and
-perspective fixes. A built-in AI editing assistant (your own OpenAI, Google or
-Anthropic key) is partly built.
+**Coming next:** HDR and panorama merge, keywords, side-by-side compare and
+batch export presets. A built-in AI editing assistant (your own OpenAI, Google
+or Anthropic key) is partly built.
 
 ## Good to know
 

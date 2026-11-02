@@ -497,6 +497,8 @@ vec3 colorEditor(vec3 c, float localRatio) {
     vec3 hsv = rgb2hsv(e);
     float dh = abs(mod(hsv.x - a.x + 3.1415927, 6.2831853) - 3.1415927);
     float m = (1.0 - ssr(a.z, a.z + a.w, dh)) * (b.x <= 0.0 ? 1.0 : ssr(b.x - b.z, b.x, hsv.y)) * (b.y >= 1.0 ? 1.0 : 1.0 - ssr(b.y, b.y + b.z, hsv.y));
+    // Near-gray pixels have no meaningful hue: fade them out (GRAY_FADE in colorEditor.ts).
+    m *= ssr(0.02, 0.08, hsv.y);
     if (m <= 0.0) continue;
     if (u.x > 0.0 || u.y > 0.0) {
       float d = mod(a.x - hsv.x + 3.1415927, 6.2831853) - 3.1415927;

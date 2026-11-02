@@ -268,18 +268,19 @@ async function desktop() {
   check(s.recipe.geometry.rotate === 3, '[ rotates left')
   const cvs = await page.locator('.ed-photo').boundingBox()
   check(cvs.height > cvs.width, 'the photo is shown upright after the turn')
+  // ~1.5 s after the last change, plus the render itself (slow in software GL under load).
+  // Waited for before the undo: rotate-then-undo within the save delay saves nothing new.
+  const thumbAfter = await until(page, async ([id, v]) => {
+    const t = (await (await import('/src/io/db.ts')).db.photos.get(id)).thumbVersion
+    return t > v ? t : null
+  }, [next, thumbBefore], 15000).catch(() => thumbBefore)
+  check(thumbAfter > thumbBefore, `thumbnail re-rendered after editing (v${thumbBefore} → v${thumbAfter})`)
   await page.keyboard.press('Control+z')
   await page.getByRole('button', { name: 'Export', exact: true }).click()
   await page.waitForSelector('[role="dialog"]')
   check(await page.getByRole('dialog').isVisible(), 'Export opens the export sheet')
   await shot(page, 'desktop-export')
   await page.keyboard.press('Escape')
-  // ~1.5 s after the last change, plus the render itself (slow in software GL under load).
-  const thumbAfter = await until(page, async ([id, v]) => {
-    const t = (await (await import('/src/io/db.ts')).db.photos.get(id)).thumbVersion
-    return t > v ? t : null
-  }, [next, thumbBefore], 10000).catch(() => thumbBefore)
-  check(thumbAfter > thumbBefore, `thumbnail re-rendered after editing (v${thumbBefore} → v${thumbAfter})`)
   check((await page.evaluate(async () => (await import('/src/io/db.ts')).kvGet('lastPhoto'))) === next, 'remembers the last photo')
 
   // Leaving flushes the save at once.

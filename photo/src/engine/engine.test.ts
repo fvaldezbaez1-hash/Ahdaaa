@@ -348,6 +348,13 @@ describe('Phase 4: levels, color editor, lens, perspective', () => {
     expect(m[2]).toBeGreaterThan(0)
     expect(m[2]).toBeLessThan(1)
     expect(rangeMembership(red, 0, 0.05)).toBe(0) // below satLow (with its soft edge)
+    // Near-gray pixels fade out even with satLow 0: their hue is noise (blotchy clouds otherwise).
+    const sky = { ...red, hue: 210, sat: 14, satLow: 0, satHigh: 100 }
+    expect(rangeMembership(sky, 210, 0)).toBe(0)
+    expect(rangeMembership(sky, 210, 0.02)).toBe(0)
+    expect(rangeMembership(sky, 210, 0.05)).toBeGreaterThan(0)
+    expect(rangeMembership(sky, 210, 0.05)).toBeLessThan(1)
+    expect(rangeMembership(sky, 210, 0.14)).toBe(1)
     const skin = { ...red, hue: 30, sat: 40, uniformity: { hue: 100, sat: 50, light: 0 } }
     const p = uniformityPull(skin, 20, 0.6, 1)
     expect(p.h).toBeCloseTo(30, 9)

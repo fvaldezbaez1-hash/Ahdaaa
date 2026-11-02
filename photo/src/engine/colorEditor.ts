@@ -17,12 +17,15 @@ export const hueDistance = (a: number, b: number) => Math.abs((((a - b) % 360) +
 const hueSoft = (r: ColorRange) => 1 + (r.smooth / 100) * 30
 const satSoft = (r: ColorRange) => 0.01 + (r.smooth / 100) * 0.25
 
+/** Below this saturation hue is mostly noise (gray clouds, white walls); membership fades out (GRAY_FADE in shaders.ts). */
+const GRAY_FADE: [number, number] = [0.02, 0.08]
+
 /** How much a color (HSV hue°, saturation 0…1) belongs to the range, 0…1, smooth (no banding). */
 export function rangeMembership(r: ColorRange, h: number, s: number): number {
   const mh = 1 - ss(r.hueWidth, r.hueWidth + hueSoft(r), hueDistance(h, r.hue))
   const lo = r.satLow / 100, hi = r.satHigh / 100, k = satSoft(r)
   const ms = (lo <= 0 ? 1 : ss(lo - k, lo, s)) * (hi >= 1 ? 1 : 1 - ss(hi, hi + k, s))
-  return mh * ms
+  return mh * ms * ss(GRAY_FADE[0], GRAY_FADE[1], s)
 }
 
 /** Skin uniformity: hue and saturation pulled toward the picked color in proportion to membership m. */
