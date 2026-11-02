@@ -3,7 +3,7 @@
 // stage, every tile and the 100 % view see the same retouched photo.
 
 import type { RemoveArea, Retouch, RetouchSpot } from '../edit/types'
-import type { Size } from './geometry'
+import { affineMapping, type Size } from './geometry'
 import type { Gpu, Target } from './gl'
 import { removalRing } from './heal'
 import { rasterizeBrush } from './local'
@@ -80,7 +80,7 @@ function removeArea(gpu: Gpu, t: Target, src: ScaledSource, a: RemoveArea, full:
   gpu.program('noiseLevel', NOISE_LEVEL).tex('u_img', t, 0).f('u_ring', rx - e, ry - e, rx + rw + e, ry + rh + e)
   gpu.draw(level)
   const w = x1 - x0, h = y1 - y0
-  const mask = rasterizeBrush(gpu, { region: { x: x0, y: y0, w, h }, toSource: [1 / k, 0, src.x0 / k, 0, 1 / k, src.y0 / k], fullSize: full }, a.strokes, w, h)
+  const mask = rasterizeBrush(gpu, { region: { x: x0, y: y0, w, h }, map: affineMapping([1 / k, 0, src.x0 / k, 0, 1 / k, src.y0 / k]), fullSize: full }, a.strokes, w, h)
   const patch = gpu.target(w, h, 'rgba16f')
   gpu.program('remove', REMOVE).tex('u_img', t, 0).tex('u_mask', mask, 1).tex('u_level', level, 2).tex('u_fill', fill.tex, 3)
     .i('u_fillSize', fill.img.width, fill.img.height).f('u_rect', rx, ry, rw, rh).f('u_origin', x0, y0).f('u_abs', src.x0, src.y0)

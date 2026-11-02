@@ -3,17 +3,17 @@
 // per-pixel sum of what the layers add to the sliders (4 RGBA targets).
 
 import type { BrushStroke, LocalLayer, Mask } from '../edit/types'
-import { applyAffine, invertAffine, type Affine, type Size } from './geometry'
+import { invertAffine, localScale, type Affine, type Mapping, type Size } from './geometry'
 import type { Gpu, Target } from './gl'
 import { LAYERS_PER_PASS, LOCAL, MASK, SEGMENT_FRAG, SEGMENT_VERT, STROKE } from './localShaders'
 import { drawableMasks, layerVector } from './masks'
-import type { Rect, StageCache } from './pipeline'
+import { setMapping, type Rect, type StageCache } from './pipeline'
 import type { Rasters } from './rasters'
 
 export interface MaskFrame {
   region: Rect
   /** Output px → full-resolution source px. */
-  toSource: Affine
+  map: Mapping
   fullSize: Size
   outLuma: number[]
   /** AI masks: their rasters, and the photo (source primaries) with its luminance weights as the edge guide. */
@@ -48,7 +48,7 @@ export function layerMasks(gpu: Gpu, cache: StageCache, f: MaskFrame, layers: Lo
     const masks = drawableMasks(layer.masks)
     const usesBase = masks.some((m) => m.type === 'range')
     const ai = masks.flatMap((m) => (m.type === 'ai' ? [f.rasters?.version(m.raster) ?? 0] : []))
-    const key = JSON.stringify([keyOf(layer.masks), f.region, f.toSource, f.fullSize, usesBase ? base?.version : 0, ai, ai.length ? f.scene?.version : 0])
+    const key = JSON.stringify([keyOf(layer.masks), f.region, f.map.P, f.map.lens, f.fullSize, usesBase ? base?.version : 0, ai, ai.length ? f.scene?.version : 0])
     out.set(layer.id, cache.run('mask:' + layer.id, key, f.region.w, f.region.h, 'r16f', false, (t) => drawMasks(gpu, f, masks, base?.target ?? null, t)))
   }
   cache.prune('mask:', new Set(layers.map((l) => 'mask:' + l.id)))
@@ -57,8 +57,8 @@ export function layerMasks(gpu: Gpu, cache: StageCache, f: MaskFrame, layers: Lo
 
 function drawMasks(gpu: Gpu, f: MaskFrame, masks: Mask[], base: Target | null, out: Target) {
   const { w: W, h: H } = f.region
-  const m = f.toSource
-  const px = Math.sqrt(Math.abs(m[0] * m[4] - m[1] * m[3]))
+  const m = f.map
+  const px = localScale(m, f.region.x + f.region.w / 2, f.region.y + f.region.h / 2)
   const SW = f.fullSize.width, SH = f.fullSize.height, L = Math.max(SW, SH)
   let prev: Target | null = null
   masks.forEach((mask, i) => {
@@ -69,14 +69,16 @@ function drawMasks(gpu: Gpu, f: MaskFrame, masks: Mask[], base: Target | null, o
     p.tex('u_prev', prev ?? gpu.dummy(), 0).tex('u_brush', brush ?? gpu.dummy(), 1).tex('u_base', base ?? gpu.dummy(), 2)
       .tex('u_raster', raster && raster.img.channels === 1 ? raster.tex : gpu.dummy(), 3).tex('u_scene', f.scene?.target ?? gpu.dummy(), 4)
       .b('u_first', i === 0).i('u_mode', MODES[mask.mode] ?? 0).b('u_invert', mask.invert)
-      .m3('u_toSource', [m[0], m[1], m[2], m[3], m[4], m[5], 0, 0, 1]).f('u_regionOrigin', f.region.x, f.region.y).f('u_px', px).f('u_outLuma', f.outLuma[0], f.outLuma[1], f.outLuma[2])
+      .f('u_regionOrigin', f.region.x, f.region.y).f('u_px', px).f('u_outLuma', f.outLuma[0], f.outLuma[1], f.outLuma[2])
+    setMapping(p, m)
     if (mask.type === 'linear') p.i('u_type', 0).f('u_a', mask.x1 * SW, mask.y1 * SH, mask.x2 * SW, mask.y2 * SH)
     else if (mask.type === 'radial') p.i('u_type', 1).f('u_a', mask.cx * SW, mask.cy * SH, Math.max(1e-6, mask.rx * L), Math.max(1e-6, mask.ry * L)).f('u_b', (mask.angle * Math.PI) / 180, mask.feather / 100, 0, 0)
     else if (mask.type === 'brush') p.i('u_type', 2)
     else if (mask.type === 'ai') {
-      const fs = invertAffine(m)
+      const fs = invertAffine(m.P.slice(0, 6) as Affine)
       p.i('u_type', 5).b('u_hasRaster', !!raster && raster.img.channels === 1).f('u_rasterSize', raster?.img.width ?? 1, raster?.img.height ?? 1)
         .f('u_luma', ...((f.luma ?? [0.2627, 0.678, 0.0593]) as [number, number, number])).m3('u_fromSource', [fs[0], fs[1], fs[2], fs[3], fs[4], fs[5], 0, 0, 1])
+        .b('u_affineMap', m.affine)
         .f('u_fullSize', SW, SH)
     }
     else if (mask.type === 'range' && mask.range === 'color') p.i('u_type', 4).f('u_a', ((mask.hue ?? 0) * Math.PI) / 180, (mask.sat ?? 0) / 100, mask.high / 100, mask.smooth / 100)
@@ -93,21 +95,21 @@ function drawMasks(gpu: Gpu, f: MaskFrame, masks: Mask[], base: Target | null, o
  * agrees). A stroke is the union (max) of its segments at `flow`; strokes build up (screen)
  * or erase (× 1 − s) in order. Also draws AI-removal areas.
  */
-export function rasterizeBrush(gpu: Gpu, f: Pick<MaskFrame, 'region' | 'toSource' | 'fullSize'>, strokes: BrushStroke[], W: number, H: number): Target {
+export function rasterizeBrush(gpu: Gpu, f: Pick<MaskFrame, 'region' | 'map' | 'fullSize'>, strokes: BrushStroke[], W: number, H: number): Target {
   const acc = gpu.target(W, H, 'r16f')
   gpu.clear(acc)
-  const inv = invertAffine(f.toSource)
   const SW = f.fullSize.width, SH = f.fullSize.height, L = Math.max(SW, SH)
-  const px = Math.sqrt(Math.abs(f.toSource[0] * f.toSource[4] - f.toSource[1] * f.toSource[3]))
   const segs: number[] = []
   const draws: { start: number; count: number; r: number; inner: number; flow: number; erase: boolean; box: number[] }[] = []
   for (const s of strokes) {
-    const r = (s.r * L) / px
-    if (!(r > 0.05) || !s.points.length || s.flow <= 0) continue
+    if (!s.points.length || s.flow <= 0) continue
+    // Points through the inverse mapping; the radius at the stroke's local scale (lens / perspective vary it).
     const pts = s.points.map((q) => {
-      const [x, y] = applyAffine(inv, q.x * SW, q.y * SH)
+      const [x, y] = f.map.fromSource(q.x * SW, q.y * SH)
       return [x - f.region.x, y - f.region.y]
     })
+    const r = (s.r * L) / localScale(f.map, pts[0][0] + f.region.x, pts[0][1] + f.region.y)
+    if (!(r > 0.05)) continue
     const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1])
     const box = [Math.max(0, Math.floor(Math.min(...xs) - r - 2)), Math.max(0, Math.floor(Math.min(...ys) - r - 2)), Math.min(W, Math.ceil(Math.max(...xs) + r + 2)), Math.min(H, Math.ceil(Math.max(...ys) + r + 2))]
     if (box[2] <= box[0] || box[3] <= box[1]) continue

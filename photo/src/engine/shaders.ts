@@ -30,6 +30,51 @@ float hash(uvec2 p) {
 export const HEAD = `${PRELUDE}out vec4 outColor;
 `
 
+/** HSV (hue in radians) of display-encoded RGB, and back. */
+const HSV_FN = `
+vec3 rgb2hsv(vec3 c) {
+  float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b)), d = mx - mn, h = 0.0;
+  if (d > 1e-9) h = mx == c.r ? mod((c.g - c.b) / d + 6.0, 6.0) : mx == c.g ? (c.b - c.r) / d + 2.0 : (c.r - c.g) / d + 4.0;
+  return vec3(h * 1.0471976, mx > 0.0 ? d / mx : 0.0, mx);
+}
+vec3 hsv2rgb(vec3 c) {
+  vec3 k = mod(vec3(5.0, 3.0, 1.0) + c.x / 1.0471976, 6.0);
+  return c.z - c.z * c.y * clamp(min(k, 4.0 - k), 0.0, 1.0);
+}
+float ssr(float a, float b, float x) { float t = clamp((x - a) / max(b - a, 1e-6), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
+`
+
+/**
+ * Output px → source px (see geometry.ts Mapping): a homography to the lens-corrected source,
+ * then the radial lens warp to the photo's own pixels. Without perspective and lens this is the
+ * plain affine map (z = 1 exactly), so results don't change.
+ */
+export const MAP_FN = `
+uniform mat3 u_toSource;
+uniform bool u_lensOn;
+uniform vec2 u_lensC;
+uniform float u_lensNorm;
+uniform int u_lensModel;
+uniform vec3 u_lensK;
+uniform float u_lensManual;
+float lensScale(float r) {
+  float r2 = r * r, s = 1.0;
+  if (u_lensModel == 1) s = 1.0 - u_lensK.x + u_lensK.x * r2;
+  else if (u_lensModel == 2) s = 1.0 + u_lensK.x * r2 + u_lensK.y * r2 * r2;
+  else if (u_lensModel == 3) s = u_lensK.x * r2 * r + u_lensK.y * r2 + u_lensK.z * r + 1.0 - u_lensK.x - u_lensK.y - u_lensK.z;
+  return s * (1.0 - u_lensManual + u_lensManual * r2);
+}
+vec2 toSource(vec2 q) {
+  vec3 h = u_toSource * vec3(q, 1.0);
+  vec2 c = h.xy / h.z;
+  if (u_lensOn) {
+    vec2 d = c - u_lensC;
+    c = u_lensC + d * lensScale(length(d) / u_lensNorm);
+  }
+  return c;
+}
+`
+
 // Shared by develop (full res) and the low-res guide: white balance, clipped
 // highlights kept neutral, in the source's own primaries.
 const DEVELOP_FN = `
@@ -87,15 +132,22 @@ void main() {
 }`
 
 /** Geometry + input transform: output px → source sample (bicubic) → white-balanced, in source primaries. a = coverage. */
-export const DEVELOP = () => `${HEAD}${DEVELOP_FN}
+export const DEVELOP = () => `${HEAD}${DEVELOP_FN}${MAP_FN}
 uniform sampler2D u_src;
 uniform ivec2 u_srcSize;
 uniform vec2 u_srcOrigin;   // scaled-source px of texel 0
 uniform float u_scale;      // scaled-source px per full-source px
 uniform vec2 u_fullSize;
-uniform mat3 u_toSource;    // output px → full-source px
 uniform vec2 u_regionOrigin;
 uniform bool u_exact;
+// Lens corrections that aren't geometry, around the source centre (lensfun radii: TCA to half the
+// shorter side, vignetting to half the diagonal).
+uniform bool u_tcaOn;
+uniform vec3 u_tcaR;        // red / blue radial scale v + c·r + b·r²
+uniform vec3 u_tcaB;
+uniform bool u_vigOn;
+uniform vec3 u_vigK;        // lensfun "pa" k1…k3 × amount
+uniform vec2 u_manualVig;   // amount ±1 (stops at the corners), start radius (fraction of the half diagonal)
 vec3 fetch(ivec2 p) { return texelFetch(u_src, clamp(p, ivec2(0), u_srcSize - 1), 0).rgb; }
 vec4 cr(float t) {
   float t2 = t * t, t3 = t2 * t;
@@ -114,14 +166,32 @@ vec3 bicubic(vec2 P) {
   }
   return acc;
 }
+vec3 sampleAt(vec2 X) { return max(bicubic(X * u_scale - u_srcOrigin), 0.0); }
 void main() {
   vec2 q = gl_FragCoord.xy + u_regionOrigin;
-  vec2 X = (u_toSource * vec3(q, 1.0)).xy;
+  vec2 X = toSource(q);
   vec2 P = X * u_scale - u_srcOrigin;
   vec3 s = u_exact ? fetch(ivec2(floor(P))) : max(bicubic(P), 0.0);
+  vec2 c = u_fullSize * 0.5, dc = X - c;
+  float norm = min(u_fullSize.x, u_fullSize.y) * 0.5, r = length(dc) / norm;
+  if (u_tcaOn) {
+    // Lateral CA: red and blue were imaged at slightly different scales; sample them where they landed.
+    s.r = sampleAt(c + dc * (u_tcaR.x + u_tcaR.y * r + u_tcaR.z * r * r)).r;
+    s.b = sampleAt(c + dc * (u_tcaB.x + u_tcaB.y * r + u_tcaB.z * r * r)).b;
+  }
   vec2 d = min(X, u_fullSize - X) * u_scale;
   float inside = clamp(min(d.x, d.y) + 0.5, 0.0, 1.0);
-  outColor = vec4(developPixel(s), inside);
+  vec3 v = developPixel(s);
+  if (u_vigOn) {
+    // lensfun "pa": radius 1 at half the diagonal.
+    float rv = length(dc) / length(c), r2 = rv * rv;
+    v /= 1.0 + u_vigK.x * r2 + u_vigK.y * r2 * r2 + u_vigK.z * r2 * r2 * r2;
+  }
+  if (u_manualVig.x != 0.0) {
+    float t = clamp((length(dc) / length(c) - u_manualVig.y) / (1.0 - u_manualVig.y), 0.0, 1.0), w = t * t * (3.0 - 2.0 * t);
+    v *= exp2(u_manualVig.x * w * w);
+  }
+  outColor = vec4(v, inside);
 }`
 
 /** Noise reduction, step 1: 2×2 average to half resolution (for chroma smoothing). */
@@ -303,7 +373,7 @@ void main() {
  * color, point curve → output-linear. Every slider is the global value plus what the
  * local layers add here (u_lp0…3, summed per pixel by the LOCAL pass).
  */
-export const TONE = (layers: boolean) => `${HEAD}
+export const TONE = (layers: boolean) => `${HEAD}${MAP_FN}${HSV_FN}
 #define LAYERS ${layers ? 1 : 0}
 uniform sampler2D u_scene;
 uniform sampler2D u_fine;
@@ -319,7 +389,6 @@ uniform sampler2D u_lp3;
 uniform bool u_layersOn;
 uniform mat3 u_toWorking;
 uniform vec3 u_luma;
-uniform mat3 u_toSource;
 uniform vec2 u_regionOrigin;
 uniform vec2 u_fullSize;
 uniform float u_exposure;
@@ -348,6 +417,10 @@ uniform bool u_curveOn;
 uniform mat3 u_toOutput;
 uniform vec3 u_wbTemp;      // LMS log2 gains per unit of local temperature / tint
 uniform vec3 u_wbTint;
+uniform int u_ceN;          // color editor ranges (see colorEditor.ts packRanges)
+uniform vec4 u_ce[64];
+uniform mat3 u_toSrgb;      // Rec.2020 → linear sRGB: ranges are picked on sRGB hue / saturation
+uniform mat3 u_fromSrgb;
 const mat3 TO_LMS = ${mat(REC2020_TO_LMS)};
 const mat3 FROM_LMS = ${mat(LMS_TO_REC2020)};
 const mat3 M2 = ${mat(OKLAB_M2)};
@@ -415,6 +488,30 @@ vec3 rgbTone(vec3 c, float xmax, vec3 cwb) {
   float tmn = toneCurve(mn, xmax, cwb);
   return tmn + (tmx - tmn) * (c - mn) / (mx - mn);
 }
+// Color editor: each range in order; membership on sRGB HSV (like the picker), uniformity pulls
+// hue / saturation toward the picked color and lightness toward the local mean, shifts in OKLCh.
+vec3 colorEditor(vec3 c, float localRatio) {
+  for (int i = 0; i < u_ceN; i++) {
+    vec4 a = u_ce[i * 4], b = u_ce[i * 4 + 1], sh = u_ce[i * 4 + 2], u = u_ce[i * 4 + 3];
+    vec3 e = encode(clamp(u_toSrgb * c, 0.0, 1.0));
+    vec3 hsv = rgb2hsv(e);
+    float dh = abs(mod(hsv.x - a.x + 3.1415927, 6.2831853) - 3.1415927);
+    float m = (1.0 - ssr(a.z, a.z + a.w, dh)) * (b.x <= 0.0 ? 1.0 : ssr(b.x - b.z, b.x, hsv.y)) * (b.y >= 1.0 ? 1.0 : 1.0 - ssr(b.y, b.y + b.z, hsv.y));
+    if (m <= 0.0) continue;
+    if (u.x > 0.0 || u.y > 0.0) {
+      float d = mod(a.x - hsv.x + 3.1415927, 6.2831853) - 3.1415927;
+      hsv.x = mod(hsv.x + d * m * u.x + 6.2831853, 6.2831853);
+      hsv.y += (a.y - hsv.y) * m * u.y;
+      c = u_fromSrgb * decode(hsv2rgb(hsv));
+    }
+    vec3 lab = toOklab(c);
+    float C = length(lab.yz), h = atan(lab.z, lab.y) + sh.x * m;
+    C *= max(0.0, 1.0 + sh.y * m);
+    float L = lab.x * (1.0 + 0.5 * sh.z * m) * exp2(localRatio * m * u.z / 3.0);
+    c = fromOklab(vec3(L, C * cos(h), C * sin(h)));
+  }
+  return c;
+}
 vec4 hueLut(float deg) {
   float fi = mod(deg + 360.0, 360.0);
   int i = int(fi) % ${HUE_LUT_SIZE};
@@ -432,7 +529,7 @@ void main() {
   vec4 src = texelFetch(u_scene, px, 0);
   vec3 c = u_toWorking * src.rgb;
   float l0 = log2(max(dot(src.rgb, u_luma), 1e-10));
-  vec2 uv = (u_toSource * vec3(gl_FragCoord.xy + u_regionOrigin, 1.0)).xy / u_fullSize;
+  vec2 uv = toSource(gl_FragCoord.xy + u_regionOrigin) / u_fullSize;
 
   // Without layers these stay zero and the compiler folds every local term away.
   vec4 L0 = vec4(0.0), L1 = vec4(0.0), L2 = vec4(0.0), L3 = vec4(0.0);
@@ -487,6 +584,11 @@ void main() {
   if (u_raw || xmax > 1.0 || cwb != vec3(0.0)) c = rgbTone(c, xmax, cwb);
 
   float sat = max(u_sat + L2.y, -1.0);
+  if (u_ceN > 0) {
+    // Local mean lightness (edge-aware, from the guide) for the skin tones' lightness uniformity.
+    vec4 g = texture(u_coef, uv);
+    c = colorEditor(c, g.z * (l0 - LOG2_MID) + g.w - (l0 - LOG2_MID));
+  }
   if (u_colorOn || sat != u_sat || L3.z != 0.0 || L3.w != 0.0) {
     vec3 lab = toOklab(c);
     float L = lab.x, C = length(lab.yz), h = atan(lab.z, lab.y);
@@ -651,3 +753,32 @@ export const DOWNSAMPLE = () => `${HEAD}
 uniform sampler2D u_src;
 uniform vec2 u_size;
 void main() { outColor = texture(u_src, gl_FragCoord.xy / u_size); }`
+
+/**
+ * Defringe: desaturate purple / green fringes (axial CA) near high-contrast edges. Works on the
+ * scene in source primaries; edge = luminance range of the neighbourhood in stops.
+ */
+export const DEFRINGE = () => `${HEAD}${HSV_FN}
+uniform sampler2D u_src;
+uniform vec3 u_luma;
+uniform mat3 u_toSrgb;   // input primaries → linear sRGB (the hue ranges are on sRGB hue)
+uniform vec4 u_purple;   // strength 0…1, hue range centre and half-width (radians)
+uniform vec4 u_green;
+uniform int u_radius;
+float inRange(float h, vec4 r) { return 1.0 - ssr(r.z, r.z + 0.17, abs(mod(h - r.y + 3.1415927, 6.2831853) - 3.1415927)); }
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy), m = textureSize(u_src, 0) - 1;
+  vec4 c = texelFetch(u_src, p, 0);
+  float lo = 1e9, hi = -1e9;
+  for (int j = -u_radius; j <= u_radius; j++)
+    for (int i = -u_radius; i <= u_radius; i++) {
+      float l = log2(max(dot(texelFetch(u_src, clamp(p + ivec2(i, j), ivec2(0), m), 0).rgb, u_luma), 1e-5));
+      lo = min(lo, l);
+      hi = max(hi, l);
+    }
+  float edge = ssr(0.7, 2.0, hi - lo);
+  if (edge <= 0.0) { outColor = c; return; }
+  vec3 hsv = rgb2hsv(encode(clamp(u_toSrgb * c.rgb, 0.0, 1.0)));
+  float w = edge * ssr(0.05, 0.25, hsv.y) * max(u_purple.x * inRange(hsv.x, u_purple), u_green.x * inRange(hsv.x, u_green));
+  outColor = vec4(mix(c.rgb, vec3(dot(c.rgb, u_luma)), w), c.a);
+}`

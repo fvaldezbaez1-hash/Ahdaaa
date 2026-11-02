@@ -4,7 +4,8 @@
 import { curveLut, isIdentity } from '../color/curve'
 import { apply, IDENTITY, mul, OKLAB_M2, REC2020_TO_LMS, REC2020_TO_SRGB, SRGB_TO_REC2020, type Mat3, type Vec3 } from '../color/matrices'
 import { rawWbRatio, relativeWbMatrix } from '../color/wb'
-import { BAND_HUES, BANDS, type BandValues, type Detail, type EditRecipe, type Effects, type LocalLayer, type ProfileId, type Wheel } from '../edit/types'
+import { BAND_HUES, BANDS, type BandValues, type Detail, type EditRecipe, type Effects, type Levels, type LevelsChannel, type LocalLayer, type ProfileId, type Wheel } from '../edit/types'
+import { packRanges } from './colorEditor'
 import { buildFilmicLut, contrastExponent, FILMIC, type Filmic } from './tone'
 import type { SourceColor } from './types'
 
@@ -119,17 +120,34 @@ export function buildHueLut(hue: BandValues, sat: BandValues, lum: BandValues, b
   return out
 }
 
-/** Composite per-channel curves (channel ∘ master) as RGBA rows, or null when all are identity. */
+const levelsIdentity = (l: LevelsChannel) => l.inBlack === 0 && l.inWhite === 255 && l.gamma === 1 && l.outBlack === 0 && l.outWhite === 255
+
+/** Levels on a display-encoded value (0…1): input range, midtone gamma (> 1 brightens), output range. */
+export function applyLevels(l: LevelsChannel, x: number): number {
+  const v = Math.min(1, Math.max(0, (x * 255 - l.inBlack) / Math.max(1e-6, l.inWhite - l.inBlack)))
+  return Math.min(1, Math.max(0, (l.outBlack + v ** (1 / Math.max(0.01, l.gamma)) * (l.outWhite - l.outBlack)) / 255))
+}
+
+/**
+ * Point curves then Levels, per channel on display-encoded values, composed into RGBA rows:
+ * channel levels ∘ master levels ∘ channel curve ∘ master curve. Null when all are identity.
+ */
 export const CURVE_LUT_SIZE = 1024
-export function buildCurveLut(c: EditRecipe['curve']): Float32Array | null {
-  if (isIdentity(c.rgb) && isIdentity(c.r) && isIdentity(c.g) && isIdentity(c.b)) return null
+export function buildCurveLut(c: EditRecipe['curve'], levels?: Levels): Float32Array | null {
+  const curves = !(isIdentity(c.rgb) && isIdentity(c.r) && isIdentity(c.g) && isIdentity(c.b))
+  const lv = levels && !(levelsIdentity(levels.rgb) && levelsIdentity(levels.r) && levelsIdentity(levels.g) && levelsIdentity(levels.b)) ? levels : null
+  if (!curves && !lv) return null
   const n = CURVE_LUT_SIZE
   const master = curveLut(c.rgb, n)
   const ch = [curveLut(c.r, n), curveLut(c.g, n), curveLut(c.b, n)]
+  const lvCh = lv ? [lv.r, lv.g, lv.b] : []
   const out = new Float32Array(n * 4)
   for (let i = 0; i < n; i++) {
     const f = master[i] * (n - 1), j = Math.floor(f), t = f - j, j1 = Math.min(n - 1, j + 1)
-    for (let k = 0; k < 3; k++) out[i * 4 + k] = ch[k][j] + (ch[k][j1] - ch[k][j]) * t
+    for (let k = 0; k < 3; k++) {
+      const v = ch[k][j] + (ch[k][j1] - ch[k][j]) * t
+      out[i * 4 + k] = lv ? applyLevels(lvCh[k], applyLevels(lv.rgb, v)) : v
+    }
     out[i * 4 + 3] = 1
   }
   return out
@@ -183,6 +201,10 @@ export interface FrameParams {
   effects: Effects
   /** The recipe's local layers (the pipeline renders the active ones). */
   layers: LocalLayer[]
+  /** Color editor ranges packed for the shader (see colorEditor.ts), or null. */
+  colorRanges: { n: number; data: Float32Array } | null
+  /** Defringe: purple / green strength 0…1 and their hue ranges (degrees), or null. */
+  defringe: { purple: number; purpleHue: [number, number]; green: number; greenHue: [number, number] } | null
   /** Cache keys: equal key ⇒ equal data. */
   keys: { input: string; tone: string; hue: string; curve: string }
 }
@@ -237,15 +259,19 @@ export function frameParams(r: EditRecipe, color: SourceColor): FrameParams {
         }
       : null,
     fade: (Math.max(0, Math.min(100, r.effects.fade)) / 100) * 0.25,
-    curveLut: buildCurveLut(r.curve),
+    curveLut: buildCurveLut(r.curve, r.levels),
     detail: r.detail,
     effects: r.effects,
     layers: r.layers ?? [],
+    colorRanges: packRanges(r.colorEditor),
+    defringe: r.lens && (r.lens.defringe.purple > 0 || r.lens.defringe.green > 0)
+      ? { purple: r.lens.defringe.purple / 20, purpleHue: r.lens.defringe.purpleHue, green: r.lens.defringe.green / 20, greenHue: r.lens.defringe.greenHue }
+      : null,
     keys: {
       input: JSON.stringify([input.wbMul, input.pre, kind]),
       tone: toneKey,
       hue: mixerActive ? hueKey : '',
-      curve: JSON.stringify(r.curve),
+      curve: JSON.stringify([r.curve, r.levels]),
     },
   }
 }

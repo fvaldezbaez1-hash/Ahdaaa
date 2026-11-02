@@ -2,7 +2,7 @@
 // math mirrors masks.ts (unit-tested there). Same conventions as shaders.ts.
 
 import { AI_RANGE_SIGMA, AI_SPATIAL_SIGMA } from './masks'
-import { HEAD, PRELUDE } from './shaders'
+import { HEAD, MAP_FN, PRELUDE } from './shaders'
 
 const SS = `
 float ss(float a, float b, float x) { float t = clamp((x - a) / max(b - a, 1e-6), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
@@ -13,7 +13,7 @@ float ss(float a, float b, float x) { float t = clamp((x - a) / max(b - a, 1e-6)
  * 2 brush (pre-rasterized), 3 luminance range, 4 color range, 5 AI (low-res raster refined by
  * joint bilateral upsampling against the photo). Positions in source px.
  */
-export const MASK = () => `${HEAD}${SS}
+export const MASK = () => `${HEAD}${SS}${MAP_FN}
 uniform sampler2D u_prev;
 uniform sampler2D u_brush;
 uniform sampler2D u_base;     // the photo as developed without local layers (output-linear)
@@ -21,7 +21,6 @@ uniform bool u_first;
 uniform int u_mode;           // 0 add, 1 subtract, 2 intersect
 uniform bool u_invert;
 uniform int u_type;
-uniform mat3 u_toSource;
 uniform vec2 u_regionOrigin;
 uniform vec4 u_a;
 uniform vec4 u_b;
@@ -32,7 +31,8 @@ uniform bool u_hasRaster;
 uniform vec2 u_rasterSize;
 uniform sampler2D u_scene;    // the photo in the region (source primaries) — the guide
 uniform vec3 u_luma;
-uniform mat3 u_fromSource;    // source px → output px
+uniform mat3 u_fromSource;    // source px → output px (affine mappings)
+uniform bool u_affineMap;
 uniform vec2 u_fullSize;
 float guide(vec2 q) {
   ivec2 i = clamp(ivec2(floor(q)), ivec2(0), textureSize(u_scene, 0) - 1);
@@ -40,7 +40,7 @@ float guide(vec2 q) {
 }
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
-  vec2 X = (u_toSource * vec3(gl_FragCoord.xy + u_regionOrigin, 1.0)).xy;
+  vec2 X = toSource(gl_FragCoord.xy + u_regionOrigin);
   float v = 0.0;
   if (u_type == 0) {
     vec2 d = u_a.zw - u_a.xy;
@@ -60,11 +60,15 @@ void main() {
       vec2 R = X / u_fullSize * u_rasterSize;
       ivec2 b = ivec2(floor(R - 0.5)) - 1, last = ivec2(u_rasterSize) - 1;
       float here = guide(gl_FragCoord.xy), sum = 0.0, wsum = 0.0;
+      // Lens / perspective: find the samples' output positions through the local Jacobian.
+      vec2 q0 = gl_FragCoord.xy + u_regionOrigin;
+      mat2 Ji = u_affineMap ? mat2(1.0) : inverse(mat2(toSource(q0 + vec2(1.0, 0.0)) - X, toSource(q0 + vec2(0.0, 1.0)) - X));
       for (int j = 0; j < 4; j++)
         for (int i = 0; i < 4; i++) {
           ivec2 c = clamp(b + ivec2(i, j), ivec2(0), last);
           vec2 ds = R - (vec2(b + ivec2(i, j)) + 0.5);
-          vec2 q = (u_fromSource * vec3((vec2(c) + 0.5) / u_rasterSize * u_fullSize, 1.0)).xy - u_regionOrigin;
+          vec2 Xs = (vec2(c) + 0.5) / u_rasterSize * u_fullSize;
+          vec2 q = (u_affineMap ? (u_fromSource * vec3(Xs, 1.0)).xy : q0 + Ji * (Xs - X)) - u_regionOrigin;
           float dl = guide(q) - here;
           float w = exp(-dot(ds, ds) / ${(2 * AI_SPATIAL_SIGMA ** 2).toFixed(4)} - dl * dl / ${(2 * AI_RANGE_SIGMA ** 2).toFixed(4)});
           sum += w * texelFetch(u_raster, c, 0).r;
