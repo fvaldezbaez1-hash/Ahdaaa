@@ -22,7 +22,8 @@ export function newRange(id: string, name: string, hue: number, sat: number, ski
     hue: Math.round(wrapHue(hue)),
     sat: Math.round(clamp(sat, 0, 100)),
     hueWidth: skin ? 25 : 15,
-    satLow: Math.round(clamp(sat - (skin ? 30 : 35), 0, 100 - SAT_GAP)),
+    // Near-gray pixels have no real hue: a muted pick starts the slice at 40 % of its saturation, not at gray.
+    satLow: Math.round(clamp(Math.max(sat - (skin ? 30 : 35), sat * 0.4), 0, 100 - SAT_GAP)),
     satHigh: Math.round(clamp(sat + (skin ? 30 : 35), SAT_GAP, 100)),
     smooth: 50,
     hueShift: 0,

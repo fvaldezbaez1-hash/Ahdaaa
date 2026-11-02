@@ -32,6 +32,8 @@ export function RangeWheel({ range, size, onChange, onDone }: { range: ColorRang
           const p = local(e)
           const hit = hitSlice(range, R, p.x, p.y, e.pointerType === 'mouse' ? 9 : 18)
           if (!hit) return
+          // No text selection (or native drag of one) from a drag on the wheel.
+          e.preventDefault()
           drag.current = hit
           e.currentTarget.setPointerCapture(e.pointerId)
         }}

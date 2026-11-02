@@ -32,7 +32,7 @@ export function LensPicker({ onClose }: { onClose: () => void }) {
     <Sheet title="Lens profile" onClose={onClose}>
       <div className="stack">
         <SearchBox value={query} onChange={setQuery} placeholder="Search lenses, e.g. 24-70 2.8" autoFocus />
-        {camera && <p className="muted small">Lenses that fit the {camera.maker} {camera.model} come first.</p>}
+        {camera && <p className="muted small">Lenses that fit the {lensName(camera)} come first.</p>}
         {found === null ? (
           <p className="muted small">Loading the lens database…</p>
         ) : found.length === 0 ? (

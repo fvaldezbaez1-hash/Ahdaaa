@@ -107,7 +107,7 @@ export function Levels() {
     <div className="stack tight ed-levels">
       <div className="row between">
         <Segmented label="Levels channel" value={ch} onChange={setCh} options={CHANNELS.map((x) => ({ value: x.id, label: x.label === 'RGB' ? 'RGB' : x.label[0], title: x.label }))} />
-        <button type="button" className="btn outline sm" onClick={auto} disabled={!bins} title="Stretch the tones to the full range">
+        <button type="button" className="btn outline sm" onClick={auto} disabled={!bins} aria-label="Auto levels" title="Stretch the tones to the full range">
           Auto
         </button>
       </div>

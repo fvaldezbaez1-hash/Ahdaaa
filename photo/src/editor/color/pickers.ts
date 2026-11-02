@@ -45,7 +45,10 @@ export function applyPick(kind: PickKind, rgb: [number, number, number]) {
     editor.apply((x) => ({ ...x, colorEditor: [...x.colorEditor, range] }), skin ? 'Color editor: skin tone' : 'Color editor: new color')
     view.set({ colorRange: range.id })
   } else if (kind === 'colorAgain') {
-    const id = view.get().colorRange
+    const ranges = editor.getState().recipe?.colorEditor ?? []
+    // The panel shows the last range when none is selected.
+    const id = (ranges.find((c) => c.id === view.get().colorRange) ?? ranges.at(-1))?.id
+    if (!id) return
     editor.apply(
       (x) => ({
         ...x,

@@ -74,7 +74,6 @@ const TOOLS: Tool[] = [
     label: 'Color',
     icon: 'palette',
     title: 'Color',
-    hint: 'White balance and color',
     parts: ['wb', 'vibrance', 'mixer', 'colorEditor'],
     body: () => (
       <Tabs id="color" label="Color panel" tabs={[{ value: 'basics', label: 'Basics' }, { value: 'editor', label: 'Color editor' }]}>
@@ -115,11 +114,19 @@ const TOOLS: Tool[] = [
     label: 'Curve',
     icon: 'curve',
     title: 'Tone',
-    hint: 'Curve: tap to add a point, drag off to remove',
     parts: ['curve', 'levels'],
     body: () => (
       <Tabs id="curve" label="Tone panel" tabs={[{ value: 'curve', label: 'Tone curve' }, { value: 'levels', label: 'Levels' }]}>
-        {(tab) => (tab === 'levels' ? <Levels /> : <ToneCurve />)}
+        {(tab) =>
+          tab === 'levels' ? (
+            <Levels />
+          ) : (
+            <>
+              <p className="muted small ed-phone-hint">Tap to add a point, drag off to remove</p>
+              <ToneCurve />
+            </>
+          )
+        }
       </Tabs>
     ),
   },
@@ -129,7 +136,6 @@ const TOOLS: Tool[] = [
     label: 'Lens',
     icon: 'lens',
     title: 'Lens & transform',
-    hint: 'Lens profile, defringe and Upright',
     parts: ['lens', 'transform'],
     body: () => (
       <Tabs id="lens" label="Lens panel" tabs={[{ value: 'lens', label: 'Lens corrections' }, { value: 'transform', label: 'Transform' }]}>

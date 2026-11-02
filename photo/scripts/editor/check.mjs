@@ -4,7 +4,7 @@
 // and takes screenshots (desktop 1440×900, phone 390×844, dark and light).
 //
 // Usage (from photo/): node scripts/editor/check.mjs <jpeg dir> <raw file> [screenshot dir] [phase…]
-// Phases: desktop phone states raw masks masksPhone ai aiPhone (default: all), and aiReal
+// Phases: desktop phone states raw masks masksPhone ai aiPhone color colorPhone lens lensPhone (default: all), and aiReal
 // (opt-in: the real on-device models from public/models, slow in software).
 import { createServer } from 'vite'
 import { createRequire } from 'node:module'
@@ -18,7 +18,7 @@ const ROOT = resolve(import.meta.dirname, '../..')
 const ASSETS = resolve(process.argv[2] ?? '.')
 const RAW = process.argv[3] ? resolve(process.argv[3]) : null
 const OUT = resolve(process.argv[4] ?? join(tmpdir(), 'lumen-editor-check'))
-const PHASES = process.argv.slice(5).length ? process.argv.slice(5) : ['desktop', 'phone', 'states', 'raw', 'masks', 'masksPhone', 'ai', 'aiPhone']
+const PHASES = process.argv.slice(5).length ? process.argv.slice(5) : ['desktop', 'phone', 'states', 'raw', 'masks', 'masksPhone', 'ai', 'aiPhone', 'color', 'colorPhone', 'lens', 'lensPhone']
 const PORT = 5204
 const URL = `http://localhost:${PORT}/`
 mkdirSync(OUT, { recursive: true })
@@ -71,6 +71,7 @@ const state = (page) =>
     return {
       photoId: s.photoId, recipe: s.recipe, history: s.history.map((h) => h.label), canUndo: s.canUndo, canRedo: s.canRedo, mode: v.mode, tool: v.tool, zoom: v.zoom, sheet: v.sheet, hist: !!v.histogram,
       layer: v.layer, mask: v.mask, overlay: v.overlay, placing: v.placing, rangePick: v.rangePick, spot: v.spot,
+      pick: v.pick, colorRange: v.colorRange, constrain: v.constrain, guideGrid: v.guideGrid,
     }
   })
 
@@ -97,8 +98,9 @@ async function openEditor(page, id) {
 const photoPixels = async (page) => (await page.locator('.ed-photo').screenshot()).toString('base64')
 
 /** Drag a range input by `fraction` of its width from its current thumb position. */
-async function dragSlider(page, label, fraction) {
-  const input = page.getByRole('slider', { name: label, exact: true }).first()
+async function dragSlider(page, label, fraction, root = page) {
+  const input = root.getByRole('slider', { name: label, exact: true }).first()
+  await input.scrollIntoViewIfNeeded()
   const box = await input.boundingBox()
   const v = await input.evaluate((el) => (Number(el.value) - Number(el.min)) / (Number(el.max) - Number(el.min)))
   const x0 = box.x + 7 + v * (box.width - 14), y = box.y + box.height / 2
@@ -943,6 +945,363 @@ async function aiPhone() {
   await page.context().close()
 }
 
+// ── Phase 4: Levels, Color editor, Lens and Transform ─────────────────
+
+/** Drag a Levels handle sideways by `fraction` of its track. */
+async function dragLevels(page, handle, fraction) {
+  const h = page.locator(`.ed-lv-handle.${handle}`)
+  const track = h.locator('..')
+  const tb = await track.boundingBox(), hb = await h.boundingBox()
+  const from = { x: hb.x + hb.width / 2, y: tb.y + tb.height / 2 }
+  await drag(page, from, { x: from.x + fraction * tb.width, y: from.y })
+}
+
+/** Click (or tap) the photo at fractions of its size with the current picker. */
+async function pickOnPhoto(page, fx, fy, touch = false) {
+  const p = await onPhoto(page, fx, fy)
+  if (touch) await page.touchscreen.tap(p.x, p.y)
+  else await page.mouse.click(p.x, p.y)
+  await page.waitForTimeout(200)
+}
+
+/** Every range of the Color editor stays a valid slice. */
+const validRange = (r) => r.hue >= 0 && r.hue < 360 && r.hueWidth >= 1 && r.hueWidth <= 90 && r.satLow >= 0 && r.satHigh <= 100 && r.satHigh - r.satLow >= 4
+
+async function colorPhase() {
+  console.log('color')
+  const page = await open({ width: 1440, height: 900 })
+  const ids = await importPhotos(page, ['/__assets/photo-21.jpg', '/__assets/photo-14.jpg'])
+  await openEditor(page, ids[0])
+  const right = page.locator('.ed-right')
+  for (const t of ['White balance', 'Light', 'Presence']) await right.getByRole('button', { name: t, exact: true }).click()
+
+  // Levels: input black, midtones, a channel, Auto, the pickers.
+  await right.getByRole('button', { name: 'Levels', exact: true }).click()
+  const lv = page.locator('.ed-levels')
+  await lv.waitFor()
+  check(((await lv.locator('.ed-curve-hist').getAttribute('d')) ?? '').length > 100, 'Levels draws the histogram')
+  let before = await photoPixels(page)
+  await dragLevels(page, 'inBlack', 0.12)
+  let s = await state(page)
+  check(s.recipe.levels.rgb.inBlack > 15 && s.history[0].startsWith('Levels input black'), `input black ${s.recipe.levels.rgb.inBlack} ("${s.history[0]}")`)
+  check(await photoDiff(page, before), 'Levels changes the photo')
+  await dragLevels(page, 'mid', -0.12)
+  s = await state(page)
+  check(s.recipe.levels.rgb.gamma > 1.1 && s.history[0].startsWith('Levels midtones'), `midtones left brightens (gamma ${s.recipe.levels.rgb.gamma})`)
+  await dragLevels(page, 'outWhite', -0.1)
+  s = await state(page)
+  check(s.recipe.levels.rgb.outWhite < 240 && s.recipe.levels.rgb.outWhite > 200, `output white ${s.recipe.levels.rgb.outWhite}`)
+  // Keyboard on a handle: one step per press, one undo step on release.
+  await lv.getByRole('slider', { name: 'Levels output white' }).focus()
+  await page.keyboard.press('ArrowRight')
+  s = await state(page)
+  check(s.history[0].startsWith('Levels output white'), `arrow key nudges a handle ("${s.history[0]}")`)
+  await lv.getByRole('button', { name: 'R', exact: true }).click()
+  await lv.getByRole('button', { name: 'Auto levels' }).click()
+  s = await state(page)
+  check(s.history[0] === 'Levels Red auto' && (s.recipe.levels.r.inBlack > 0 || s.recipe.levels.r.inWhite < 255), `Auto on the red channel (${s.recipe.levels.r.inBlack}…${s.recipe.levels.r.inWhite})`)
+  await lv.getByRole('button', { name: 'White', exact: true }).click()
+  check((await state(page)).pick === 'white' && (await page.locator('.ed-stage.picking').count()) === 1, 'white point picker armed')
+  await shot(page, 'p4-levels-pick')
+  await pickOnPhoto(page, 0.45, 0.45)
+  s = await state(page)
+  check(s.pick === null && s.history[0] === 'Levels: white point', `white point from the photo (r ${s.recipe.levels.r.inWhite}, g ${s.recipe.levels.g.inWhite}, b ${s.recipe.levels.b.inWhite})`)
+  await page.keyboard.press('Control+z')
+  await lv.getByRole('button', { name: 'Black', exact: true }).click()
+  await page.keyboard.press('Escape')
+  check((await state(page)).pick === null, 'Esc cancels a picker')
+  await lv.getByRole('button', { name: 'RGB', exact: true }).click()
+  await shot(page, 'p4-levels')
+
+  // Color editor: pick a color, shape it on the wheel, shift it; skin tone.
+  await right.getByRole('button', { name: /^Levels/ }).click()
+  await right.getByRole('button', { name: 'Color editor', exact: true }).click()
+  const ce = page.locator('.ed-coloreditor')
+  await ce.getByRole('button', { name: 'Pick a color' }).click()
+  await pickOnPhoto(page, 0.3, 0.12) // blue sky
+  s = await state(page)
+  let r = s.recipe.colorEditor[0]
+  check(s.recipe.colorEditor.length === 1 && r.hue > 180 && r.hue < 250 && s.history[0] === 'Color editor: new color' && s.colorRange === r.id, `sky picked: hue ${r?.hue}°, sat ${r?.sat}`)
+  await ce.locator('.ed-rwheel').evaluate((el) => el.scrollIntoView({ block: 'start' }))
+  await shot(page, 'p4-color-editor')
+  const hueA = await center(ce.locator('.ed-slice-h').first())
+  await drag(page, hueA, { x: hueA.x + 14, y: hueA.y + 14 })
+  s = await state(page)
+  r = s.recipe.colorEditor[0]
+  check(r.hueWidth !== 15 && validRange(r) && s.history[0] === 'Color 1: hue range', `dragging a hue edge widens the slice (±${r.hueWidth}°)`)
+  const c0 = await center(ce.locator('.ed-slice-c'))
+  await drag(page, c0, { x: c0.x - 10, y: c0.y + 6 })
+  s = await state(page)
+  check(s.recipe.colorEditor[0].hue !== r.hue && validRange(s.recipe.colorEditor[0]) && s.history[0] === 'Color 1: color', `dragging the middle moves the color (${r.hue}° → ${s.recipe.colorEditor[0].hue}°) ${JSON.stringify(s.recipe.colorEditor[0])} "${s.history[0]}"`)
+  before = await photoPixels(page)
+  await dragSlider(page, 'Saturation', -0.3, ce)
+  await dragSlider(page, 'Hue', 0.2, ce)
+  s = await state(page)
+  r = s.recipe.colorEditor[0]
+  check(r.satShift < -20 && r.hueShift > 3 && s.history[0].startsWith('Color 1: Hue +'), `shifts: hue ${r.hueShift}°, saturation ${r.satShift}`)
+  check(await photoDiff(page, before), 'the sky changes')
+  await ce.getByRole('checkbox', { name: 'Turn off Color 1' }).click()
+  s = await state(page)
+  check(!s.recipe.colorEditor[0].enabled && s.history[0] === 'Turn off Color 1', 'a range turns off')
+  await ce.getByRole('checkbox', { name: 'Turn on Color 1' }).click()
+  await ce.getByRole('button', { name: 'Skin tone' }).click()
+  await pickOnPhoto(page, 0.2, 0.42) // red roof stands in for skin
+  s = await state(page)
+  r = s.recipe.colorEditor[1]
+  check(s.recipe.colorEditor.length === 2 && !!r.uniformity && r.name === 'Skin tone 1' && s.colorRange === r.id, 'skin tone range with uniformity')
+  await dragSlider(page, 'Hue uniformity', 0.4, ce)
+  s = await state(page)
+  check(s.recipe.colorEditor[1].uniformity.hue > 20 && s.history[0].startsWith('Skin tone 1: hue uniformity'), `hue uniformity ${s.recipe.colorEditor[1].uniformity.hue}`)
+  await ce.getByRole('button', { name: 'Re-pick' }).click()
+  await pickOnPhoto(page, 0.3, 0.12)
+  s = await state(page)
+  check(s.history[0] === 'Color editor: pick color' && s.recipe.colorEditor[1].hue > 180, 'Re-pick follows a new color')
+  await page.keyboard.press('Control+z')
+  await ce.locator('.ed-rwheel').evaluate((el) => el.scrollIntoView({ block: 'start' }))
+  await shot(page, 'p4-skin-tone')
+  await setTheme(page, 'light')
+  await shot(page, 'p4-color-editor-light')
+  await setTheme(page, 'dark')
+  // Ranges with a pick near red: the wheel wraps around 0°.
+  await page.evaluate(async () => {
+    const { editor } = await import('/src/state/editor.ts')
+    editor.apply((x) => ({ ...x, colorEditor: x.colorEditor.map((c, i) => (i === 1 ? { ...c, hue: 4, hueWidth: 20 } : c)) }), 'test: red')
+  })
+  await ce.locator('.ed-rwheel').evaluate((el) => el.scrollIntoView({ block: 'start' }))
+  const hueB = await center(ce.locator('.ed-slice-h').nth(1))
+  await drag(page, hueB, { x: hueB.x + 6, y: hueB.y - 6 })
+  s = await state(page)
+  check(validRange(s.recipe.colorEditor[1]), `edges stay valid across 0° (hue ${s.recipe.colorEditor[1].hue}°, ±${s.recipe.colorEditor[1].hueWidth}°)`)
+
+  // Copy Levels and the Color editor onto the next photo.
+  await page.keyboard.press('Control+c')
+  await page.waitForTimeout(300)
+  const copied = (await state(page)).recipe
+  await openEditor(page, ids[1])
+  await page.keyboard.press('Control+v')
+  await page.waitForSelector('.ed-check')
+  await shot(page, 'p4-paste')
+  await page.getByRole('button', { name: 'Paste', exact: true }).click()
+  s = await state(page)
+  check(JSON.stringify(s.recipe.levels) === JSON.stringify(copied.levels) && s.recipe.colorEditor.length === 2, 'Levels and the Color editor paste onto another photo')
+  await right.getByRole('button', { name: 'Reset Color editor' }).click()
+  check((await state(page)).recipe.colorEditor.length === 0, 'section reset clears the Color editor')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
+async function colorPhone() {
+  console.log('colorPhone')
+  const page = await open({ width: 390, height: 844 }, true)
+  const [id] = await importPhotos(page, ['/__assets/photo-21.jpg'])
+  await openEditor(page, id)
+  const tap = (name) => page.getByRole('button', { name, exact: true }).tap()
+  await tap('Color')
+  await tap('Color editor')
+  await tap('Pick a color')
+  await pickOnPhoto(page, 0.3, 0.12, true)
+  let s = await state(page)
+  check(s.recipe.colorEditor.length === 1 && s.recipe.colorEditor[0].hue > 180, 'phone: tap picks a color')
+  await shot(page, 'p4-phone-color-editor')
+  const panel = page.locator('.ed-phone-panel-body')
+  await dragSlider(page, 'Lightness', 0.2, panel)
+  s = await state(page)
+  check(s.recipe.colorEditor[0].lightShift > 5, `phone: lightness shift ${s.recipe.colorEditor[0].lightShift}`)
+  await panel.evaluate((el) => (el.scrollTop = 400))
+  await shot(page, 'p4-phone-color-sliders')
+  await tap('Curve')
+  await tap('Levels')
+  await dragLevels(page, 'inWhite', -0.15)
+  s = await state(page)
+  check(s.recipe.levels.rgb.inWhite < 230, `phone: Levels input white ${s.recipe.levels.rgb.inWhite}`)
+  await shot(page, 'p4-phone-levels')
+  await tap('Color')
+  check(await page.locator('.ed-coloreditor').isVisible(), 'phone: the Color tool remembers its sub-tab')
+  await setTheme(page, 'light')
+  await shot(page, 'p4-phone-color-light')
+  await tap('Curve')
+  await shot(page, 'p4-phone-levels-light')
+  await setTheme(page, 'dark')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
+/** Give an imported photo a camera and lens the lens database knows. */
+const fakeExif = (page, id, meta) =>
+  page.evaluate(async ({ id, meta }) => {
+    const { db } = await import('/src/io/db.ts')
+    const p = await db.photos.get(id)
+    await db.photos.update(id, { meta: { ...p.meta, ...meta } })
+  }, { id, meta })
+
+const CANON = { make: 'Canon', model: 'Canon EOS 5D Mark II', lens: 'EF24-105mm f/4L IS USM', focalLength: 24, aperture: 8 }
+
+async function lensPhase() {
+  console.log('lens')
+  const page = await open({ width: 1440, height: 900 })
+  const ids = await importPhotos(page, ['/__assets/photo-21.jpg', '/__assets/photo-06.jpg'])
+  for (const id of ids) await fakeExif(page, id, CANON)
+  await openEditor(page, ids[0])
+  let s = await state(page)
+  check(!s.recipe.lens.enabled && !s.recipe.geometry.lens, 'profile corrections start off')
+  const right = page.locator('.ed-right')
+  for (const t of ['White balance', 'Light', 'Presence']) await right.getByRole('button', { name: t, exact: true }).click()
+  await right.getByRole('button', { name: 'Lens corrections', exact: true }).click()
+  const lens = page.locator('.ed-lens')
+  await until(page, () => /24-105/.test(document.querySelector('.ed-lens-found')?.textContent ?? ''))
+  check(true, `found: ${await lens.locator('.ed-lens-found').textContent()}`)
+  check(/lensfun/.test(await lens.locator('.ed-attribution').textContent()), 'lensfun attribution shown')
+  let before = await photoPixels(page)
+  await lens.getByRole('switch', { name: 'Use profile corrections' }).click()
+  s = await until(page, async () => {
+    const r = (await import('/src/state/editor.ts')).editor.getState().recipe
+    return r.lens.profileId && r
+  })
+  check(/24-105/.test(s.lens.profileId) && !!s.geometry.lens?.profile && !!s.lens.vignetting, `profile resolved (${s.lens.profileId}; ${s.geometry.lens?.profile?.model}, vignetting ${!!s.lens.vignetting}, CA ${!!s.lens.tca})`)
+  check(await photoDiff(page, before), 'the profile changes the photo')
+  s = await state(page)
+  check(s.history[0].startsWith('Lens profile: '), `history "${s.history[0]}"`)
+  await dragSlider(page, 'Distortion', -0.25, lens)
+  s = await state(page)
+  check(s.recipe.geometry.lens.profile.amount < 80 && s.history[0].startsWith('Profile distortion'), `profile distortion amount ${s.recipe.geometry.lens.profile.amount} %`)
+  await shot(page, 'p4-lens')
+  // Change… : pick another lens by name.
+  await lens.getByRole('button', { name: 'Change…' }).click()
+  const sheet = page.locator('[aria-modal="true"]')
+  await sheet.getByRole('searchbox').fill('16-35mm f/2.8L')
+  await sheet.locator('.list-row').first().waitFor()
+  await shot(page, 'p4-lens-picker')
+  const name = await sheet.locator('.list-row').first().locator('.ellipsis').textContent()
+  await sheet.locator('.list-row').first().click()
+  s = await until(page, async () => {
+    const r = (await import('/src/state/editor.ts')).editor.getState().recipe
+    return /16-35/.test(r.lens.profileId) && r
+  })
+  check(s.geometry.lens.profile.amount < 80, `re-resolved for "${name}", keeping the amount (${s.geometry.lens.profile.amount} %)`)
+  // Manual corrections and defringe.
+  await dragSlider(page, 'Midpoint', 0.2, lens)
+  await page.locator('.ed-right').evaluate((el) => (el.scrollTop = el.scrollHeight))
+  await lens.getByRole('switch', { name: 'Remove chromatic aberration' }).click()
+  s = await state(page)
+  check(s.recipe.lens.autoCA && s.history[0] === 'Remove chromatic aberration', 'Remove chromatic aberration')
+  await lens.getByRole('button', { name: 'Pick a fringe color' }).click()
+  await pickOnPhoto(page, 0.3, 0.12)
+  s = await state(page)
+  const d = s.recipe.lens.defringe
+  check(s.history[0].startsWith('Defringe:') && (d.purple >= 5 || d.green >= 5), `fringe pick sets defringe (purple ${d.purple} ${d.purpleHue}, green ${d.green} ${d.greenHue})`)
+  await shot(page, 'p4-lens-defringe')
+  await lens.getByRole('switch', { name: 'Use profile corrections' }).click()
+  s = await state(page)
+  check(!s.recipe.lens.enabled && !s.recipe.lens.profileId && !s.recipe.geometry.lens?.profile, 'profile off clears the resolved profile')
+  await page.keyboard.press('Control+z')
+  s = await state(page)
+  check(s.recipe.lens.enabled && /16-35/.test(s.recipe.lens.profileId), 'undo brings the profile back')
+
+  // Transform: Upright Auto, sliders with Constrain crop, Guided lines.
+  await right.getByRole('button', { name: 'Transform', exact: true }).click()
+  const tf = page.locator('.ed-right .ed-transform')
+  await tf.locator('.ed-upright').getByRole('button', { name: 'Auto', exact: true }).click()
+  s = await until(page, async () => {
+    const st = (await import('/src/state/editor.ts')).editor.getState()
+    return st.history[0].label.startsWith('Upright') && st
+  })
+  check(s.recipe.geometry.perspective?.mode === 'auto' || s.history[0].label === 'Upright: Auto', `Upright Auto (${JSON.stringify(s.recipe.geometry.perspective ?? null)})`)
+  await tf.getByRole('switch', { name: /Constrain crop/ }).click()
+  await page.locator('.ed-right').evaluate((el) => (el.scrollTop = el.scrollHeight))
+  await dragSlider(page, 'Vertical', 0.2, tf)
+  s = await state(page)
+  const p = s.recipe.geometry.perspective
+  check(p.vertical > 10 && p.mode === 'manual' && p.scale > 100 && s.constrain, `Vertical ${p.vertical} with Constrain crop scales to ${p.scale} %`)
+  check(s.history[0].startsWith('Transform: Vertical'), `history "${s.history[0]}"`)
+  await shot(page, 'p4-transform')
+  await page.keyboard.press('Shift+T')
+  check((await state(page)).tool === 'guides' && (await page.locator('.ed-grid').count()) === 1, 'Shift+T starts Guided Upright with a grid')
+  await drag(page, await onPhoto(page, 0.427, 0.22), await onPhoto(page, 0.418, 0.55), { steps: 8 })
+  s = await state(page)
+  check(s.recipe.geometry.perspective.guides.length === 1, 'one guide drawn')
+  await drag(page, await onPhoto(page, 0.6, 0.6), await onPhoto(page, 0.95, 0.59), { steps: 8 })
+  s = await until(page, async () => {
+    const st = (await import('/src/state/editor.ts')).editor.getState()
+    return st.recipe.geometry.perspective?.guides.length === 2 && st
+  })
+  check(s.recipe.geometry.perspective.mode === 'guided' && s.history[0].label === 'Guided Upright', `two guides solve the perspective (${s.recipe.geometry.perspective.rotate.toFixed(2)}°, vertical ${s.recipe.geometry.perspective.vertical})`)
+  await shot(page, 'p4-guided')
+  // Drag an end: the line follows, still one step.
+  const end = await center(page.locator('.ed-guide-end').nth(1))
+  await drag(page, end, { x: end.x + 8, y: end.y + 4 })
+  s = await state(page)
+  check(s.recipe.geometry.perspective.guides.length === 2 && s.history[0] === 'Guided Upright', 'dragging an end keeps two guides')
+  // Drag a line off the photo: removed.
+  const ph = await page.locator('.ed-photo').boundingBox()
+  const end2 = await center(page.locator('.ed-guide-end').nth(3))
+  await drag(page, end2, { x: ph.x + ph.width + 60, y: end2.y })
+  s = await state(page)
+  check(s.recipe.geometry.perspective.guides.length === 1, 'a line dragged off the photo goes')
+  await page.keyboard.press('Escape')
+  check((await state(page)).tool === null, 'Esc leaves Guided Upright')
+  await setTheme(page, 'light')
+  await shot(page, 'p4-transform-light')
+  await setTheme(page, 'dark')
+
+  // Paste Lens onto a photo: the profile is found again for that photo.
+  await page.keyboard.press('Control+c')
+  await page.waitForTimeout(300)
+  await openEditor(page, ids[1])
+  await page.keyboard.press('Control+v')
+  await page.waitForSelector('.ed-check')
+  await page.getByRole('checkbox', { name: 'Transform (Upright)' }).check()
+  await page.getByRole('button', { name: 'Paste', exact: true }).click()
+  s = await until(page, async () => {
+    const r = (await import('/src/state/editor.ts')).editor.getState().recipe
+    return r.lens.profileId && r
+  })
+  // This photo's own lens (from its EXIF), not the one chosen by hand on the other photo.
+  check(/24-105/.test(s.lens.profileId) && !!s.geometry.lens?.profile && s.geometry.lens.profile.amount === 50 && !!s.geometry.perspective, `pasted lens resolved for this photo (${s.lens.profileId}, amount ${s.geometry.lens?.profile?.amount} %), transform pasted`)
+  // Persisted with the photo: reopening resolves nothing new.
+  await page.waitForTimeout(1200)
+  const saved = await stored(page, ids[1])
+  check(saved.lens.enabled && saved.lens.profileId === s.lens.profileId, 'resolved profile saved with the photo')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
+async function lensPhone() {
+  console.log('lensPhone')
+  const page = await open({ width: 390, height: 844 }, true)
+  const [id] = await importPhotos(page, ['/__assets/photo-21.jpg'])
+  await fakeExif(page, id, CANON)
+  await openEditor(page, id)
+  const tap = (name) => page.getByRole('button', { name, exact: true }).tap()
+  await page.locator('.ed-phone-tools').evaluate((el) => (el.scrollLeft = 400))
+  await tap('Lens')
+  await until(page, () => /24-105/.test(document.querySelector('.ed-lens-found')?.textContent ?? ''))
+  await page.getByRole('switch', { name: 'Use profile corrections' }).tap()
+  await until(page, async () => (await import('/src/state/editor.ts')).editor.getState().recipe.lens.profileId)
+  check(true, 'phone: profile corrections on')
+  await shot(page, 'p4-phone-lens')
+  await tap('Transform')
+  await page.locator('.ed-upright').getByRole('button', { name: 'Guided', exact: true }).tap()
+  check((await state(page)).tool === 'guides', 'phone: Guided Upright')
+  await drag(page, await onPhoto(page, 0.427, 0.22), await onPhoto(page, 0.418, 0.55), { steps: 8 })
+  await drag(page, await onPhoto(page, 0.6, 0.6), await onPhoto(page, 0.95, 0.59), { steps: 8 })
+  const s = await until(page, async () => {
+    const st = (await import('/src/state/editor.ts')).editor.getState()
+    return st.recipe.geometry.perspective?.guides.length === 2 && st
+  })
+  check(s.recipe.geometry.perspective.mode === 'guided', 'phone: two lines solve the perspective')
+  await shot(page, 'p4-phone-guided')
+  await tap('Light')
+  check((await state(page)).tool === null, 'phone: another tool leaves Guided Upright')
+  await tap('Lens')
+  await setTheme(page, 'light')
+  await shot(page, 'p4-phone-transform-light')
+  await tap('Lens corrections')
+  await shot(page, 'p4-phone-lens-light')
+  await setTheme(page, 'dark')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
 try {
   if (PHASES.includes('desktop')) await desktop()
   if (PHASES.includes('phone')) await phone()
@@ -953,6 +1312,10 @@ try {
   if (PHASES.includes('ai')) await aiPhase()
   if (PHASES.includes('aiPhone')) await aiPhone()
   if (PHASES.includes('aiReal')) await aiReal()
+  if (PHASES.includes('color')) await colorPhase()
+  if (PHASES.includes('colorPhone')) await colorPhone()
+  if (PHASES.includes('lens')) await lensPhase()
+  if (PHASES.includes('lensPhone')) await lensPhone()
 } catch (e) {
   failures.push(String(e))
   console.log('ERROR', e)

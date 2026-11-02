@@ -13,8 +13,8 @@ const inside = (p: ToolPointer) => p.x >= 0 && p.y >= 0 && p.x <= p.box.w && p.y
 
 /**
  * Guided Upright on the photo: drag to draw a line along something that should
- * be vertical or horizontal; drag an end to adjust it, the middle to move it,
- * off the photo to remove it. The perspective is solved when you let go.
+ * be vertical or horizontal; drag an end to adjust it, the middle to move it;
+ * drop either off the photo to remove the line. The perspective is solved when you let go.
  */
 function createGuidesTool(session: Session): StageTool {
   const src = srcOf(session)
@@ -41,7 +41,7 @@ function createGuidesTool(session: Session): StageTool {
       if (!d) return
       const r = editor.getState().recipe
       let guides = r ? perspectiveOf(r).guides : d.base
-      if (d.hit?.part === 'line' && !inside(p)) guides = removeGuide(d.base, d.hit.i)
+      if (d.hit && !inside(p)) guides = removeGuide(d.base, d.hit.i)
       else if (!d.hit && Math.hypot(p.x - d.start.x, p.y - d.start.y) < MIN_LENGTH) guides = d.base
       commitGuides(session, guides)
     },

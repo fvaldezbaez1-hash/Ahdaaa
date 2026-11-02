@@ -20,7 +20,9 @@ export function needsResolve(r: Pick<EditRecipe, 'lens' | 'geometry'>): boolean 
 
 /** Put a resolved profile (or none found: null) into the recipe, keeping amounts, manual values and the CA choice. */
 export function withProfile(r: EditRecipe, resolved: ResolvedProfile | null, opts: { tca?: boolean } = {}): EditRecipe {
-  const keepTca = opts.tca ?? (r.lens.tca !== null || !r.lens.profileId)
+  // Never resolved yet: chromatic aberration correction defaults to on.
+  const fresh = !r.lens.profileId && !r.lens.vignetting && !r.lens.tca && !r.geometry.lens?.profile
+  const keepTca = opts.tca ?? (r.lens.tca !== null || fresh)
   const distortionAmount = r.geometry.lens?.profile?.amount ?? 100
   const vignettingAmount = r.lens.vignetting?.amount ?? 100
   return {
@@ -49,11 +51,19 @@ export function withoutProfile(r: EditRecipe): EditRecipe {
   }
 }
 
-/** Pasted onto another photo, a profile has to be found again for that photo's lens and focal length. */
+/** Lateral CA that changes nothing: stands for "CA correction on" until the profile is found. */
+const NO_TCA: NonNullable<LensCorrection['tca']> = { r: [1, 0, 0], b: [1, 0, 0] }
+
+/**
+ * Pasted onto another photo, the profile has to be found again for that photo's lens and focal
+ * length: the coefficients become neutral (they change nothing until then) while the amounts and
+ * the CA choice travel with the paste.
+ */
 export function blankProfile<T extends Partial<Pick<EditRecipe, 'lens' | 'geometry'>>>(r: T): T {
+  const l = r.lens, p = r.geometry?.lens?.profile
   return {
     ...r,
-    ...(r.lens && { lens: { ...r.lens, profileId: '', vignetting: null, tca: null } }),
-    ...(r.geometry?.lens && { geometry: { ...r.geometry, lens: { ...r.geometry.lens, profile: null } } }),
+    ...(l && { lens: { ...l, profileId: '', vignetting: l.vignetting && { k: [0, 0, 0], amount: l.vignetting.amount }, tca: l.tca && NO_TCA } }),
+    ...(r.geometry?.lens && p && { geometry: { ...r.geometry, lens: { ...r.geometry.lens, profile: { ...p, k: [] } } } }),
   }
 }

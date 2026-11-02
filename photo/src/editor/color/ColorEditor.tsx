@@ -56,7 +56,7 @@ function UniformitySlider({ range, k, label }: { range: ColorRange; k: 'hue' | '
       signed={false}
       defaultValue={0}
       onChange={(v) => update(range.id, (r) => ({ ...r, uniformity: { ...u, ...r.uniformity, [k]: v } }))}
-      onCommit={(v) => editor.commit(`${range.name}: ${label.toLowerCase()} uniformity ${Math.round(v)}`)}
+      onCommit={(v) => editor.commit(`${range.name}: ${label.toLowerCase()} ${Math.round(v)}`)}
     />
   )
 }
@@ -87,10 +87,10 @@ function Selected({ range, wheel }: { range: ColorRange; wheel: number }) {
       <RangeSlider range={range} k="lightShift" />
       {range.uniformity && (
         <>
-          <SubHead>Uniformity</SubHead>
-          <UniformitySlider range={range} k="hue" label="Hue" />
-          <UniformitySlider range={range} k="sat" label="Saturation" />
-          <UniformitySlider range={range} k="light" label="Lightness" />
+          <SubHead>Skin tone</SubHead>
+          <UniformitySlider range={range} k="hue" label="Hue uniformity" />
+          <UniformitySlider range={range} k="sat" label="Saturation uniformity" />
+          <UniformitySlider range={range} k="light" label="Lightness uniformity" />
         </>
       )}
     </div>

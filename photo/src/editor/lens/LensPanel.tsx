@@ -6,7 +6,7 @@ import { Icon } from '../../ui/Icon'
 import { formatValue, Slider } from '../../ui/Slider'
 import { SubHead } from '../panels/Section'
 import { useSession } from '../session'
-import { view } from '../view'
+import { useView, view } from '../view'
 import { LensPicker } from './LensPicker'
 import { disableProfile, enableProfile, lensName, loadLens, lookUp, useLensStatus } from './lensSync'
 
@@ -99,7 +99,8 @@ export function LensPanel() {
   const lens = useEditor((s) => s.recipe?.lens)
   const hasDistortion = useEditor((s) => !!s.recipe?.geometry.lens?.profile)
   const status = useLensStatus()
-  const [picking, setPicking] = useState(false)
+  const picking = useView((s) => s.pick === 'fringe')
+  const [choosing, setChoosing] = useState(false)
   const [attribution, setAttribution] = useState('')
   useEffect(() => {
     lookUp(session)
@@ -120,10 +121,10 @@ export function LensPanel() {
       <ToggleRow label="Use profile corrections" checked={lens.enabled} onChange={(on) => (on ? void enableProfile(session) : disableProfile())} />
       <div className="ed-lens-found">
         <span className="small text-2">
-          {status.camera && <span className="muted">{`${status.camera.maker} ${status.camera.model} · `}</span>}
+          {status.camera && <span className="muted">{`${lensName(status.camera)} · `}</span>}
           {line}
         </span>
-        <button type="button" className="btn ghost sm" onClick={() => setPicking(true)}>
+        <button type="button" className="btn ghost sm" onClick={() => setChoosing(true)}>
           Change…
         </button>
       </div>
@@ -146,7 +147,7 @@ export function LensPanel() {
       <ToggleRow label="Remove chromatic aberration" hint="Found in the photo itself" checked={lens.autoCA} onChange={(on) => editor.apply((r) => ({ ...r, lens: { ...r.lens, autoCA: on } }), on ? 'Remove chromatic aberration' : 'Keep chromatic aberration')} />
       <div className="row between">
         <SubHead>Defringe</SubHead>
-        <button type="button" className="icon-btn" aria-label="Pick a fringe color" title="Pick a fringe color on the photo" onClick={() => view.set({ pick: 'fringe' })}>
+        <button type="button" className={picking ? 'icon-btn on' : 'icon-btn'} aria-pressed={picking} aria-label="Pick a fringe color" title="Pick a fringe color on the photo" onClick={() => view.set({ pick: picking ? null : 'fringe' })}>
           <Icon name="eyedropper" size={16} />
         </button>
       </div>
@@ -165,7 +166,7 @@ export function LensPanel() {
         </>
       )}
       {attribution && <p className="muted small ed-attribution">{attribution}</p>}
-      {picking && <LensPicker onClose={() => setPicking(false)} />}
+      {choosing && <LensPicker onClose={() => setChoosing(false)} />}
     </div>
   )
 }
