@@ -777,3 +777,19 @@
     animation: none;
   }
 }
+
+/* ---------- Keywords (Phase 5) ---------- */
+.lib-info-kw .lib-heading {
+  padding: 0 0 6px;
+}
+.lib-side-note {
+  margin: 0;
+  padding: 0 8px;
+  line-height: 1.4;
+}
+.lib-keywords .kw-icon {
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-3);
+  background: var(--panel-2);
+}

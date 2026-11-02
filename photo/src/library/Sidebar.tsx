@@ -21,7 +21,7 @@ export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s:
           <Icon name="folder" size={16} />
         </button>
       </div>
-      <SearchBox value={lib.search} onChange={lib.setSearch} placeholder="Camera, lens, file name" />
+      <SearchBox value={lib.search} onChange={lib.setSearch} placeholder="Keyword, camera, lens, file name" />
 
       <nav aria-label="Smart collections">
         <div className="lib-heading">Library</div>
@@ -54,6 +54,29 @@ export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s:
         <button type="button" className="lib-new-album" onClick={() => open({ type: 'newAlbum', ids: [] })}>
           + New album
         </button>
+      </nav>
+
+      <nav aria-label="Keywords" className="lib-keywords">
+        <div className="lib-heading">Keywords</div>
+        {lib.keywords.length === 0 && <p className="muted small lib-side-note">Add keywords from the info panel or to selected photos, then find them here.</p>}
+        {lib.keywords.map((k) => {
+          const id = `keyword:${k.name}` as const
+          const on = lib.keyword === k.name
+          return (
+            <div key={k.name} className="lib-album">
+              <button type="button" className="lib-nav" aria-current={on ? 'true' : undefined} onClick={() => setView(on ? 'all' : id)}>
+                <span className="cover kw-icon" aria-hidden="true">
+                  <Icon name="tag" size={14} />
+                </span>
+                <span className="ellipsis">{k.name}</span>
+                <span className="count">{k.count.toLocaleString('en-US')}</span>
+              </button>
+              <button type="button" className="more" aria-label={`Options for keyword ${k.name}`} onClick={() => open({ type: 'keywordMenu', name: k.name })}>
+                <Icon name="more" size={16} />
+              </button>
+            </div>
+          )
+        })}
       </nav>
 
       <div className="lib-storage">

@@ -1,3 +1,4 @@
+import { KeywordEditor } from '../../library/KeywordEditor'
 import { useEditor } from '../../state/editor'
 import { ColorEditor } from '../color/ColorEditor'
 import { CropActions, CropPanel } from '../crop/CropPanel'
@@ -26,6 +27,9 @@ function Info() {
       {exposure && <div className="tnum">{exposure}</div>}
       {camera && <div className="ellipsis">{camera}</div>}
       {!exposure && !camera && <div>{`${record.width.toLocaleString('en-US')} × ${record.height.toLocaleString('en-US')} px`}</div>}
+      <div className="ed-keywords">
+        <KeywordEditor ids={[record.id]} compact />
+      </div>
     </div>
   )
 }

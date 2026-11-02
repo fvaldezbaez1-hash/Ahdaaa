@@ -257,6 +257,7 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
           <div className="lib-batch" role="toolbar" aria-label="Selected photos">
             <span className="count">{selected.length.toLocaleString('en-US')} selected</span>
             <BatchButton icon="presets" label="Apply preset" onClick={() => open({ type: 'preset', ids: selected })} />
+            <BatchButton icon="tag" label="Keywords" onClick={() => open({ type: 'keywords', ids: selected })} />
             <BatchButton icon="paste" label="Paste edits" onClick={() => void pasteEdits(selected)} />
             <BatchButton icon="undo" label="Reset edits" onClick={() => open({ type: 'reset', ids: selected })} />
             {lib.album ? (

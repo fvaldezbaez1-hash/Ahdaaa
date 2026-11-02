@@ -128,4 +128,8 @@ export interface ExportOptions {
   stripLocation: boolean
   /** Phase 3: AI "Super Resolution" — 2 doubles width and height before `longEdge` applies. */
   upscale?: 1 | 2
+  /** Phase 5: write the photo's keywords (XMP, plus IPTC in JPEG and TIFF). Default on. */
+  includeKeywords?: boolean
+  /** Phase 5: file name template, e.g. "{name}-web" (see library/fileNames.ts). Default "{name}-lumen". */
+  fileName?: string
 }

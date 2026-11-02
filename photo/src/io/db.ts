@@ -14,6 +14,9 @@ export class LumenDB extends Dexie {
   kv!: EntityTable<KV, 'key'>
   /** Phase 3: stored AI results (masks, removal fills, denoised sources), see rasters.ts. */
   rasters!: EntityTable<RasterRecord, 'id'>
+  /** Phase 5: sync bookkeeping (see src/sync). */
+  syncStamps!: EntityTable<SyncStamp, 'id'>
+  tombstones!: EntityTable<Tombstone, 'id'>
 
   constructor(name = 'lumen') {
     super(name)
@@ -27,7 +30,30 @@ export class LumenDB extends Dexie {
     })
     // Phase 3: AI results. A new table only; existing data is untouched.
     this.version(2).stores({ rasters: 'id, photoId' })
+    // Phase 5: a multi-entry index on keywords (photos without any just aren't in it, so no
+    // data changes), and two small tables for sync: when ratings / flags / keywords / albums
+    // last changed, and what was deleted (so other devices delete it too, not bring it back).
+    this.version(3).stores({
+      photos: 'id, addedAt, takenAt, rating, flag, edited, *albumIds, fileName, *keywords',
+      syncStamps: 'id',
+      tombstones: 'id, at',
+    })
   }
+}
+
+/** Phase 5: when a photo's info (`p:<id>`) or an album (`a:<id>`) last changed, ms. */
+export interface SyncStamp {
+  id: string
+  at: number
+}
+
+/** Phase 5: something deleted on this device; `key` is a photo's identity key or an album / preset id. */
+export interface Tombstone {
+  /** `${kind}:${key}` */
+  id: string
+  kind: 'photo' | 'album' | 'exportPreset'
+  key: string
+  at: number
 }
 
 export const db = new LumenDB()

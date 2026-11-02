@@ -1943,3 +1943,9 @@ body:has(.ed-is-phone) .toast {
 .ed-phone .ed-lv-hist {
   height: 64px;
 }
+
+/* ── Phase 5: keywords under the photo info, side-by-side compare ───── */
+.ed-keywords {
+  margin-top: 8px;
+  color: var(--text);
+}

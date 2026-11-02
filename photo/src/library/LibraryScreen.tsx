@@ -1,16 +1,17 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
-import { MenuSheet, type MenuItem } from '../ui/Sheet'
+import { MenuSheet, Sheet, type MenuItem } from '../ui/Sheet'
 import { Spinner } from '../ui/controls'
 import { useIsPhone } from '../ui/hooks'
 import { Icon } from '../ui/Icon'
 import { toast } from '../ui/toast'
-import { copyEdits, createAlbum, deleteAlbum, removeFromAlbum, removePhotos, renameAlbum, resetEdits, setFlag } from './actions'
+import { copyEdits, createAlbum, deleteAlbum, deleteKeyword, removeFromAlbum, removePhotos, renameAlbum, renameKeyword, resetEdits, setFlag } from './actions'
 import { AlbumPicker, NameSheet } from './AlbumSheets'
 import { ConfirmSheet } from './ConfirmSheet'
 import { DesktopLibrary } from './DesktopLibrary'
 import { useDropImport } from './drop'
 import { ExportSheet } from './ExportSheet'
 import { ImportSheet } from './ImportSheet'
+import { KeywordEditor } from './KeywordEditor'
 import { importer, useImport } from './importer'
 import { EMPTY_SELECTION, plural } from './library'
 import { PhoneLibrary } from './PhoneLibrary'
@@ -183,10 +184,66 @@ function LibrarySheets({
           you saved them.
         </ConfirmSheet>
       )
+    case 'keywordMenu':
+      return (
+        <MenuSheet
+          title={sheet.name}
+          onClose={close}
+          items={[
+            { label: 'Rename…', icon: 'edit', onClick: () => open({ type: 'renameKeyword', name: sheet.name }) },
+            {
+              label: 'Remove from all photos…',
+              icon: 'trash',
+              danger: true,
+              onClick: () => open({ type: 'deleteKeyword', name: sheet.name, count: lib.keywords.find((k) => k.name === sheet.name)?.count ?? 0 }),
+            },
+          ]}
+        />
+      )
+    case 'renameKeyword':
+      return (
+        <NameSheet
+          title="Rename keyword"
+          initial={sheet.name}
+          confirmLabel="Rename"
+          onClose={close}
+          onSubmit={async (name) => {
+            const n = await renameKeyword(sheet.name, name)
+            if (lib.keyword === sheet.name) lib.setView(`keyword:${name.trim()}`)
+            toast(`Renamed on ${plural(n, 'photo')}`)
+          }}
+        />
+      )
+    case 'deleteKeyword':
+      return (
+        <ConfirmSheet
+          title={`Remove “${sheet.name}”?`}
+          confirmLabel="Remove keyword"
+          onClose={close}
+          onConfirm={async () => {
+            await deleteKeyword(sheet.name)
+            if (lib.keyword === sheet.name) lib.setView('all')
+            close()
+          }}
+        >
+          The keyword comes off {plural(sheet.count, 'photo')}. The photos stay.
+        </ConfirmSheet>
+      )
+    case 'keywords':
+      return (
+        <Sheet title={sheet.ids.length === 1 ? 'Keywords' : `Keywords · ${plural(sheet.ids.length, 'photo')}`} onClose={close}>
+          <div className="stack">
+            <KeywordEditor ids={sheet.ids} autoFocus />
+            <p className="muted small">Separate keywords with commas. Search finds photos by keyword, and the sidebar lists them all.</p>
+          </div>
+        </Sheet>
+      )
     case 'more': {
       const ids = sheet.ids
       const one = ids.length === 1 ? lib.byId.get(ids[0]) : undefined
       const items: MenuItem[] = [
+        { label: 'Keywords…', icon: 'tag', onClick: () => open({ type: 'keywords', ids }) },
+        ...(ids.length >= 2 ? [{ label: 'Compare', icon: 'compare' as const, onClick: () => lib.openCompare(ids) }, { label: 'Survey', icon: 'survey' as const, onClick: () => lib.openSurvey(ids) }] : []),
         { label: 'Mark as pick', icon: 'flag', onClick: () => void setFlag(ids, 1) },
         { label: 'Reject', icon: 'reject', onClick: () => void setFlag(ids, -1) },
         { label: 'Clear flag', icon: 'x', onClick: () => void setFlag(ids, 0) },

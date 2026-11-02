@@ -10,7 +10,9 @@ import { updateSettings, useSettings, type Settings } from '../state/settings'
 import { Icon, type IconName } from '../ui/Icon'
 import { Segmented, Spinner } from '../ui/controls'
 import { useIsPhone } from '../ui/hooks'
+import { ExportPresetsCard } from './ExportPresetsCard'
 import { StorageSection } from './StorageSection'
+import { SyncSection } from './SyncSection'
 import './settings.css'
 
 const THEMES: { value: Settings['theme']; label: React.ReactNode }[] = [
@@ -66,6 +68,8 @@ const SHORTCUTS: { keys: string[][]; what: string }[] = [
   },
   { keys: [['Delete']], what: 'Delete the selected photos (asks first)' },
   { keys: [['Esc']], what: 'Clear the selection' },
+  { keys: [['C']], what: 'Compare two photos (arrows change the candidate, ↑ makes it the select)' },
+  { keys: [['N']], what: 'Survey the selected photos' },
 ]
 
 /** Words shown between keys rather than as keys. */
@@ -77,6 +81,7 @@ const SECTIONS: { id: string; label: string; icon: IconName }[] = [
   { id: 'models', label: 'AI models', icon: 'wand' },
   { id: 'export', label: 'Export', icon: 'download' },
   { id: 'storage', label: 'Storage & backup', icon: 'folder' },
+  { id: 'sync', label: 'Sync', icon: 'sync' },
   { id: 'keys', label: 'Keyboard shortcuts', icon: 'keyboard' },
   { id: 'about', label: 'About & privacy', icon: 'lock' },
 ]
@@ -148,10 +153,15 @@ export function SettingsScreen() {
                   }}
                 />
               </div>
+              <ExportPresetsCard />
             </Section>
 
             <Section id="storage" title="Storage & backup" desc="Your library lives in this browser’s storage on this device.">
               <StorageSection />
+            </Section>
+
+            <Section id="sync" title="Sync" desc="Keep your library in step across your devices through your own cloud storage — iCloud Drive, Dropbox, OneDrive or Google Drive. No account, and nothing goes anywhere else.">
+              <SyncSection />
             </Section>
 
             {!phone && (

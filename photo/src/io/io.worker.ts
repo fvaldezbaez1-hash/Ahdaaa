@@ -3,7 +3,7 @@
 import type { Mat3 } from '../color/matrices'
 import type { SourceImage } from '../engine/types'
 import { bitmapToLinear, type DecodedPixels } from './decode/image'
-import { readExif } from './decode/exif'
+import { readExif, readKeywords } from './decode/exif'
 import { orientRgb16, swapsAxes } from './decode/orient'
 import { resampleRgb16 } from './decode/resample'
 import { linearToJpeg, rgbaToJpeg } from './decode/thumb'
@@ -34,6 +34,8 @@ export interface EncodeArgs {
   /** Present when metadata is kept. */
   exif?: ExifInput
   colorSpace: 'srgb' | 'display-p3'
+  /** Phase 5: keywords to write (XMP, plus IPTC in JPEG and TIFF). */
+  keywords?: string[]
 }
 
 const handlers = {
@@ -65,6 +67,11 @@ const handlers = {
     return { image, fullWidth: swap ? d.fullHeight : d.fullWidth, fullHeight: swap ? d.fullWidth : d.fullHeight, meta }
   },
 
+  /** Phase 5: keywords stored in the file (XMP, IPTC), read at import. */
+  async keywords(a: { blob: Blob }): Promise<string[]> {
+    return readKeywords(a.blob)
+  },
+
   async resample(a: { image: SourceImage; maxLongEdge?: number }): Promise<SourceImage> {
     return resampleRgb16(a.image.data, a.image.width, a.image.height, a.maxLongEdge)
   },
@@ -81,12 +88,12 @@ const handlers = {
     const icc = a.colorSpace === 'display-p3' ? displayP3Profile() : undefined
     if (a.format === 'tiff16') {
       if (!(a.rgba instanceof Uint16Array)) throw new Error('16-bit TIFF needs 16-bit pixels')
-      return encodeTiff16(a.rgba, a.width, a.height, { exif: a.exif, icc })
+      return encodeTiff16(a.rgba, a.width, a.height, { exif: a.exif, icc, keywords: a.keywords })
     }
     const exif = a.exif ? exifTiff(a.exif) : undefined
-    if (a.format === 'png') return encodePng(a.rgba, a.width, a.height, { exif, icc: icc && { name: 'Display P3', data: icc }, srgb: !icc })
+    if (a.format === 'png') return encodePng(a.rgba, a.width, a.height, { exif, icc: icc && { name: 'Display P3', data: icc }, srgb: !icc, keywords: a.keywords })
     if (a.rgba instanceof Uint16Array) throw new Error('JPEG needs 8-bit pixels')
-    return encodeJpeg(a.rgba, a.width, a.height, { quality: a.quality, exif, icc })
+    return encodeJpeg(a.rgba, a.width, a.height, { quality: a.quality, exif, icc, keywords: a.keywords })
   },
 }
 

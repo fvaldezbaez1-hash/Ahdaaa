@@ -1,6 +1,7 @@
 // JPEG export through MozJPEG (WASM), with our own EXIF (APP1) and ICC (APP2)
 // segments spliced in after SOI/JFIF. Output is baseline (sequential) JPEG.
 import encode from '@jsquash/jpeg/encode'
+import { iptcKeywords, photoshopIptc, xmpPacket } from './xmp'
 
 export interface JpegOptions {
   /** 1…100. */
@@ -8,6 +9,8 @@ export interface JpegOptions {
   /** TIFF-structured EXIF block. */
   exif?: Uint8Array
   icc?: Uint8Array
+  /** Phase 5: keywords as XMP (APP1) and IPTC (APP13). */
+  keywords?: readonly string[]
 }
 
 function segment(marker: number, header: string, body: Uint8Array, extra: number[] = []): Uint8Array<ArrayBuffer> {
@@ -22,13 +25,15 @@ function segment(marker: number, header: string, body: Uint8Array, extra: number
 }
 
 /** Insert metadata segments after SOI (and after JFIF APP0, if present). */
-export function insertJpegSegments(jpeg: Uint8Array, exif?: Uint8Array, icc?: Uint8Array): Uint8Array<ArrayBuffer>[] {
+export function insertJpegSegments(jpeg: Uint8Array, exif?: Uint8Array, icc?: Uint8Array, keywords?: readonly string[]): Uint8Array<ArrayBuffer>[] {
   if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8) throw new Error('Not a JPEG')
   let at = 2
   if (jpeg[2] === 0xff && jpeg[3] === 0xe0) at = 4 + ((jpeg[4] << 8) | jpeg[5])
   const segs: Uint8Array<ArrayBuffer>[] = []
   if (exif) segs.push(segment(0xe1, 'Exif\0\0', exif))
+  if (keywords?.length) segs.push(segment(0xe1, 'http://ns.adobe.com/xap/1.0/\0', xmpPacket(keywords)))
   if (icc) segs.push(segment(0xe2, 'ICC_PROFILE\0', icc, [1, 1]))
+  if (keywords?.length) segs.push(segment(0xed, 'Photoshop 3.0\0', photoshopIptc(iptcKeywords(keywords))))
   return [jpeg.slice(0, at), ...segs, jpeg.slice(at)]
 }
 
@@ -47,5 +52,5 @@ export async function encodeJpeg(rgba: Uint8ClampedArray, width: number, height:
     auto_subsample: false,
     chroma_subsample: quality >= 90 ? 1 : 2,
   })
-  return new Blob(insertJpegSegments(new Uint8Array(buf), opts.exif, opts.icc), { type: 'image/jpeg' })
+  return new Blob(insertJpegSegments(new Uint8Array(buf), opts.exif, opts.icc, opts.keywords), { type: 'image/jpeg' })
 }

@@ -5,7 +5,7 @@ import { ai } from '../editor/ai/core'
 import type { RenderedImage } from '../engine/types'
 import { abortError, isAbort } from './abort'
 import { db } from './db'
-import { exportName, openSink } from './save'
+import { EXTENSION, exportName, openSink } from './save'
 import { seams } from './seams'
 import type { DecodedPhoto, ExportOptions, PhotoRecord } from './types'
 import { decodeStored } from './working'
@@ -69,34 +69,56 @@ async function exportOne(p: PhotoRecord, opts: ExportOptions, onFraction: (f: nu
   }
   onFraction(0.8)
   const exif = opts.keepMetadata ? { meta: p.meta, width: r.width, height: r.height, colorSpace: opts.colorSpace, includeGps: !opts.stripLocation } : undefined
-  return seams.encode({ format: opts.format, rgba: r.data as Uint8ClampedArray<ArrayBuffer> | Uint16Array, width: r.width, height: r.height, quality: opts.quality, exif, colorSpace: opts.colorSpace }, signal)
+  const keywords = opts.includeKeywords !== false && p.keywords?.length ? p.keywords : undefined
+  return seams.encode({ format: opts.format, rgba: r.data as Uint8ClampedArray<ArrayBuffer> | Uint16Array, width: r.width, height: r.height, quality: opts.quality, exif, colorSpace: opts.colorSpace, keywords }, signal)
 }
 
-export async function exportPhotos(ids: string[], opts: ExportOptions, onProgress?: (p: ExportProgress) => void, signal?: AbortSignal): Promise<{ saved: number; failed: { name: string; reason: string }[] }> {
+/** Phase 5: one set of export settings in a multi-preset export ("Web JPEG" + "Full TIFF"). */
+export interface ExportVariant {
+  opts: ExportOptions
+  /** File name without extension for each photo (index in the export); default "<name>-lumen". */
+  name?: (p: PhotoRecord, index: number) => string
+  /** Shown with a failure when several variants run. */
+  label?: string
+}
+
+export async function exportPhotos(ids: string[], opts: ExportOptions, onProgress?: (p: ExportProgress) => void, signal?: AbortSignal, name?: ExportVariant['name']): Promise<{ saved: number; failed: { name: string; reason: string }[] }> {
+  return exportVariants(ids, [{ opts, name }], onProgress, signal)
+}
+
+/** Export every photo once per variant, into one place (one folder pick / one share). */
+export async function exportVariants(ids: string[], variants: ExportVariant[], onProgress?: (p: ExportProgress) => void, signal?: AbortSignal): Promise<{ saved: number; failed: { name: string; reason: string }[] }> {
   const photos = (await db.photos.bulkGet(ids)).filter((p): p is PhotoRecord => !!p)
   const names = new Set<string>()
-  const planned = photos.map((p) => {
-    const name = exportName(p.fileName, opts.format, (n) => names.has(n))
-    names.add(name)
-    return name
-  })
+  const taken = (n: string) => names.has(n.toLowerCase())
+  const jobs = variants.flatMap((v) =>
+    photos.map((p, i) => {
+      let file: string
+      if (v.name) {
+        const stem = v.name(p, i)
+        for (let n = 1; ; n++) if (!taken((file = `${stem}${n > 1 ? `-${n}` : ''}${EXTENSION[v.opts.format]}`))) break
+      } else file = exportName(p.fileName, v.opts.format, taken)
+      names.add(file.toLowerCase())
+      return { p, v, file }
+    }),
+  )
   // Ask where to save first, while the click that started the export still counts as a user gesture.
-  const sink = seams.sink ?? (await openSink(planned, opts.format))
+  const sink = seams.sink ?? (await openSink(jobs.map((j) => j.file), variants[0].opts.format))
   const failed: { name: string; reason: string }[] = []
   let saved = 0
-  const total = photos.length
+  const total = jobs.length
   for (let i = 0; i < total; i++) {
     if (signal?.aborted) throw abortError()
-    const p = photos[i]
-    const report = (fraction: number) => onProgress?.({ done: i, total, fraction, current: p.fileName })
+    const { p, v, file } = jobs[i]
+    const report = (fraction: number) => onProgress?.({ done: i, total, fraction, current: variants.length > 1 && v.label ? `${p.fileName} · ${v.label}` : p.fileName })
     report(0)
     try {
-      const blob = await exportOne(p, opts, report, signal)
-      await sink.write({ name: planned[i], blob })
+      const blob = await exportOne(p, v.opts, report, signal)
+      await sink.write({ name: file, blob })
       saved++
     } catch (e) {
       if (isAbort(e) || signal?.aborted) throw abortError()
-      failed.push({ name: p.fileName, reason: (e as Error).message || 'Export failed' })
+      failed.push({ name: p.fileName, reason: `${variants.length > 1 && v.label ? `${v.label}: ` : ''}${(e as Error).message || 'Export failed'}` })
     }
   }
   if (saved) await sink.finish()

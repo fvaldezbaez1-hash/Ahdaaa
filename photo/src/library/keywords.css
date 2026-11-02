@@ -1,0 +1,110 @@
+/* Keyword editor (library info panel, batch sheet, editor info). */
+.kw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel-2);
+  cursor: text;
+}
+.kw-chips:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.kw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 26px;
+  max-width: 100%;
+  padding: 0 2px 0 10px;
+  border-radius: 999px;
+  background: var(--panel-3);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+.kw-chip > button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--text-3);
+}
+.kw-chip > button:hover {
+  color: var(--text);
+  background: var(--line-2);
+}
+.kw-chip.partial {
+  padding-left: 0;
+  background: transparent;
+  border: 1px dashed var(--line-2);
+  color: var(--text-2);
+}
+.kw-chip.partial .kw-add-all {
+  width: auto;
+  height: 24px;
+  padding: 0 4px 0 10px;
+  border-radius: 999px;
+  color: var(--text-2);
+  font: inherit;
+}
+.kw-input-wrap {
+  position: relative;
+  flex: 1 1 120px;
+  min-width: 120px;
+}
+.kw-input {
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+.kw-suggest {
+  position: absolute;
+  z-index: 30;
+  left: -6px;
+  top: calc(100% + 8px);
+  min-width: 200px;
+  max-width: 280px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.kw-suggest li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.kw-suggest li:hover,
+.kw-suggest li.on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.kw.compact .kw-chips {
+  min-height: 34px;
+  padding: 3px;
+}
+.kw.compact .kw-chip {
+  height: 24px;
+  font-size: 12px;
+}
