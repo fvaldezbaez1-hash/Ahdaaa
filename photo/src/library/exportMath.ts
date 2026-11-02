@@ -23,7 +23,7 @@ export function sizeChoiceOf(longEdge: number | undefined): SizeChoice {
   return preset ? preset.value : 'custom'
 }
 
-type Sized = Pick<PhotoRecord, 'width' | 'height' | 'recipe'>
+type Sized = Pick<PhotoRecord, 'width' | 'height' | 'recipe'> & { id?: string }
 
 /** Pixel size of the exported file: crop and quarter turns applied, scaled down (never up) to `longEdge`. */
 export function outputSize(p: Sized, longEdge?: number): { width: number; height: number } {
@@ -52,12 +52,25 @@ export function bytesPerPixel(format: ExportFormat, quality: number): number {
   return 0.05 + 0.75 * q ** 6
 }
 
-export function estimateBytes(photos: readonly Sized[], opts: Pick<ExportOptions, 'format' | 'quality' | 'longEdge'>): number {
-  const bpp = bytesPerPixel(opts.format, opts.quality)
+/**
+ * Full-size JPEG bytes per pixel relative to the photo's own thumbnail (512 px, quality 82) at
+ * quality 92. Measured: ≈0.7–0.8 for smooth photos and gradients, ≈1.15 for detailed camera files.
+ */
+const THUMB_TO_FULL_AT_92 = 1
+
+/**
+ * Estimated total size. JPEG uses each photo's thumbnail (bytes per pixel, from `thumbBpp`) as a
+ * measure of how much detail it has, so a smooth gradient isn't priced like a forest; without a
+ * thumbnail it falls back to the typical-photo rate. PNG and TIFF use the typical rates.
+ */
+export function estimateBytes(photos: readonly Sized[], opts: Pick<ExportOptions, 'format' | 'quality' | 'longEdge'>, thumbBpp?: ReadonlyMap<string, number>): number {
+  const typical = bytesPerPixel(opts.format, opts.quality)
+  const scale = THUMB_TO_FULL_AT_92 * (typical / bytesPerPixel('jpeg', 92))
   let total = 0
   for (const p of photos) {
     const { width, height } = outputSize(p, opts.longEdge)
-    total += width * height * bpp
+    const t = opts.format === 'jpeg' && p.id ? thumbBpp?.get(p.id) : undefined
+    total += width * height * (t ? Math.min(typical, t * scale) : typical)
   }
   return total
 }

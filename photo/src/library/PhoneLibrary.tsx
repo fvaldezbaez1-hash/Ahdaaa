@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { isIOS } from '../io/platform'
 import { navigate } from '../router'
 import { updateSettings, useSettings } from '../state/settings'
 import { Icon, type IconName } from '../ui/Icon'
@@ -177,7 +178,7 @@ export function PhoneLibrary({ lib, open }: { lib: Library; open: (s: LibraryShe
           <Icon name="lock" size={20} />
           <div>
             <b>Private by design</b>
-            <span>Originals stay on this phone. RAW from Files, JPEG and HEIC from Photos.</span>
+            <span>{isIOS() ? 'Originals stay on this device. RAW from Files, JPEG and HEIC from Photos.' : 'Originals stay on this device; nothing is uploaded.'}</span>
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@ import { aiReady, generatePreset } from '../assistant/api'
 import type { EditRecipe, SourceKind } from '../edit/types'
 import { previewJpeg } from '../io/api'
 import { link } from '../router'
+import { loadSettings } from '../state/settings'
 import { Icon } from '../ui/Icon'
 import { toast } from '../ui/toast'
 import { addUserPreset } from './store'
@@ -11,13 +12,13 @@ import { addUserPreset } from './store'
 export function DescribeLook({ photo, onCreated }: { photo: { id: string; kind: SourceKind; recipe: EditRecipe } | null; onCreated: (id: string) => void }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<'setup' | string | null>(null)
+  const [note, setNote] = useState<'off' | 'key' | string | null>(null)
 
   const create = async () => {
     const description = text.trim()
     if (!description || busy) return
     setNote(null)
-    if (!(await aiReady())) return setNote('setup')
+    if (!(await aiReady())) return setNote((await loadSettings()).ai.enabled ? 'key' : 'off')
     setBusy(true)
     try {
       const preview = photo ? (await previewJpeg(photo.id, photo.recipe, 768).catch(() => null))?.dataUrl : undefined
@@ -51,9 +52,10 @@ export function DescribeLook({ photo, onCreated }: { photo: { id: string; kind: 
           {busy ? 'Creating…' : 'Create'}
         </button>
       </form>
-      {note === 'setup' ? (
+      {note === 'off' || note === 'key' ? (
         <p className="small text-2" role="status">
-          The AI uses your own API key. Turn it on in <a href={link('/settings')}>Settings → AI assistant</a>, then describe your look again.
+          {note === 'off' ? 'The AI assistant is turned off. Turn it on and add your own API key in ' : 'The AI uses your own API key. Add one in '}
+          <a href={link('/settings')}>Settings → AI assistant</a>, then describe your look again.
         </p>
       ) : (
         note && (

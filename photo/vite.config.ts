@@ -16,7 +16,7 @@ export default defineConfig({
       manifest: {
         name: 'Lumen – Photo Editor',
         short_name: 'Lumen',
-        description: 'Private RAW photo editor for every camera: pro tools, 1,000 presets and an AI assistant.',
+        description: 'Private RAW photo editor for every camera: pro tools, 100 presets and on-device AI.',
         lang: 'en',
         start_url: './',
         scope: './',

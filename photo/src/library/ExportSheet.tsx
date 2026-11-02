@@ -36,6 +36,11 @@ const variantOf = (o: ExportOptions, total: number, label?: string): ExportVaria
 export function ExportSheet({ ids, onClose }: { ids: string[]; onClose: () => void }) {
   const settings = useSettings()
   const photos = useLiveQuery(() => db.photos.bulkGet(ids).then((ps) => ps.filter((p): p is PhotoRecord => !!p)), [ids.join('\n')])
+  // Thumbnail weight per pixel: how much detail each photo has, for the size estimate.
+  const thumbBpp = useLiveQuery(
+    () => db.thumbs.bulkGet(ids).then((ts) => new Map(ts.flatMap((t) => (t && t.width * t.height ? [[t.id, t.blob.size / (t.width * t.height)] as const] : [])))),
+    [ids.join('\n')],
+  )
   const [draft, setDraft] = useState<ExportOptions | null>(null)
   const opts = draft ?? settings?.export
   const [progress, setProgress] = useState<ExportProgress | null>(null)
@@ -188,7 +193,7 @@ export function ExportSheet({ ids, onClose }: { ids: string[]; onClose: () => vo
       </div>
     )
   } else {
-    const bytes = !opts || !photos ? 0 : several ? chosen.reduce((n, p) => n + estimateBytes(photos, p.options), 0) : estimateBytes(photos, opts)
+    const bytes = !opts || !photos ? 0 : several ? chosen.reduce((n, p) => n + estimateBytes(photos, p.options, thumbBpp), 0) : estimateBytes(photos, opts, thumbBpp)
     body = opts ? (
       <div className="stack loose">
         <Summary photos={photos} single={single} opts={several ? undefined : opts} />

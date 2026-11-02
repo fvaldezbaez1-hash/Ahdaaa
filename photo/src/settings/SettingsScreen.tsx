@@ -221,7 +221,7 @@ export function SettingsScreen() {
                 <ul>
                   <li>Originals are never changed: edits are saved as instructions and applied when you view or export.</li>
                   <li>
-                    The AI assistant is off until you add a key. When you use it, only a small preview of the photo (about 1,000 px) and your request go to the provider you chose.
+                    The AI assistant only works once you add your own API key (Settings → AI assistant). When you use it, only a small preview of the photo (about 1,000 px) and your request go to the provider you chose.
                   </li>
                   <li>API keys are stored only on this device.</li>
                 </ul>
