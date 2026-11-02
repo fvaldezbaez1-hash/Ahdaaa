@@ -4,7 +4,7 @@
 // conflict rules are unit-tested:
 //
 //   • A photo is the same photo on every device when its file name, size and
-//     capture time match (as the edits backup matches).
+//     capture time (from its metadata, when it has one) match.
 //   • Per photo, the newest edit wins (recipe, by PhotoRecord.editedAt); its
 //     info — rating, flag, keywords, albums — travels separately, newest
 //     change wins. A tie keeps this device's version.

@@ -1,3 +1,4 @@
+import { defaultRecipe } from '../../edit/defaults'
 import type { EditRecipe } from '../../edit/types'
 import type { Engine, SourceImage } from '../../engine/types'
 import { editor } from '../../state/editor'
@@ -59,6 +60,8 @@ export class StageView {
   /** Side by side: the original's canvas, and what it was last drawn for. */
   private before: HTMLCanvasElement | null = null
   private beforeKey = ''
+  private beforeTries = 0
+  private beforeTimer: ReturnType<typeof setTimeout> | undefined
 
   private engine: Engine
   private photoEl: HTMLElement
@@ -252,13 +255,26 @@ export class StageView {
     const c = this.engine.canvas as HTMLCanvasElement
     const key = `${c.width}x${c.height}|${JSON.stringify(r.geometry)}|${r.profile}|${r.treatment}`
     if (key === this.beforeKey) return
-    this.engine.render(r, { view: 'before' })
+    // The original as an ordinary render of the as-shot recipe with this framing (what the engine's
+    // own "before" shows; its before path draws nothing yet when the photo is scaled down).
+    const { kind, asShot } = editor.getState()
+    this.engine.render({ ...defaultRecipe(kind, asShot), geometry: r.geometry }, { view: 'after' })
     if (b.width !== c.width || b.height !== c.height) {
       b.width = c.width
       b.height = c.height
     }
     // Right after drawing: the WebGL buffer is still there within this task.
-    b.getContext('2d')?.drawImage(c, 0, 0)
+    const g = b.getContext('2d', { willReadFrequently: true })
+    if (!g) return
+    g.clearRect(0, 0, b.width, b.height)
+    g.drawImage(c, 0, 0)
+    // The original's look may still be loading (the engine then draws nothing): try again shortly.
+    if (g.getImageData(b.width >> 1, b.height >> 1, 1, 1).data[3] === 0 && this.beforeTries++ < 40) {
+      clearTimeout(this.beforeTimer)
+      this.beforeTimer = setTimeout(() => this.request(), 50)
+      return
+    }
+    this.beforeTries = 0
     this.beforeKey = key
   }
 
@@ -338,6 +354,7 @@ export class StageView {
     cancelAnimationFrame(this.raf)
     clearTimeout(this.histTimer)
     clearTimeout(this.settleTimer)
+    clearTimeout(this.beforeTimer)
     this.unsubs.forEach((u) => u())
   }
 }

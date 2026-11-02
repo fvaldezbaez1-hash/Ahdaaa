@@ -28,8 +28,10 @@ export interface Camera {
 }
 
 export interface PanoPlan {
-  /** Focal length in analysis pixels (shared by all photos). */
+  /** Output focal length in analysis pixels (the reference photo's): sets the panorama's scale. */
   f: number
+  /** Each photo's focal length (analysis pixels): they may differ a little (zoom, crops). */
+  focals: number[]
   cameras: Camera[]
   /** Analysis size of each photo. */
   sizes: { width: number; height: number }[]
@@ -134,24 +136,28 @@ function ray(cam: M3, f: number, x: number, y: number): [number, number, number]
  * focal length, minimizing the distance between the rays of matched points
  * (Levenberg–Marquardt, numeric Jacobian).
  */
-export function bundleAdjust(cams: M3[], f: number, ref: number, pairs: readonly Pair[], iterations = 30): { cams: M3[]; f: number; rms: number } {
+export function bundleAdjust(cams: M3[], f: number, ref: number, pairs: readonly Pair[], iterations = 30): { cams: M3[]; focals: number[]; rms: number } {
   const n = cams.length
   // Up to 80 matches per pair keep it fast.
   const obs = pairs.flatMap((p) => p.matches.filter((_, k) => k % Math.max(1, Math.ceil(p.matches.length / 80)) === 0).map((m) => ({ i: p.i, j: p.j, m })))
   const free = Array.from({ length: n }, (_, k) => k).filter((k) => k !== ref)
-  const P = free.length * 3 + 1
+  // Parameters: a rotation update per photo but the reference, and every photo's log focal length.
+  const P = free.length * 3 + n
   const build = (x: number[]) => {
     const rs = cams.slice()
     free.forEach((k, a) => (rs[k] = mul3(rodrigues([x[a * 3], x[a * 3 + 1], x[a * 3 + 2]]), cams[k])))
-    return { rs, ff: f * Math.exp(x[P - 1]) }
+    return { rs, fs: cams.map((_, k) => f * Math.exp(x[free.length * 3 + k])) }
   }
   const residuals = (x: number[]) => {
-    const { rs, ff } = build(x)
+    const { rs, fs } = build(x)
     const r: number[] = []
     for (const o of obs) {
-      const a = ray(rs[o.i], ff, o.m.x2, o.m.y2), b = ray(rs[o.j], ff, o.m.x1, o.m.y1)
-      r.push((a[0] - b[0]) * ff, (a[1] - b[1]) * ff, (a[2] - b[2]) * ff)
+      const a = ray(rs[o.i], fs[o.i], o.m.x2, o.m.y2), b = ray(rs[o.j], fs[o.j], o.m.x1, o.m.y1)
+      const s = (fs[o.i] + fs[o.j]) / 2
+      r.push((a[0] - b[0]) * s, (a[1] - b[1]) * s, (a[2] - b[2]) * s)
     }
+    // Focal lengths stay close to each other unless the matches insist (weak prior, in pixels).
+    for (let k = 0; k < n; k++) r.push(x[free.length * 3 + k] * 2)
     return r
   }
   let x = new Array<number>(P).fill(0)
@@ -188,8 +194,8 @@ export function bundleAdjust(cams: M3[], f: number, ref: number, pairs: readonly
     }
     if (!improved) break
   }
-  const { rs, ff } = build(x)
-  return { cams: rs.map(nearestRotation), f: ff, rms: Math.sqrt(cost / Math.max(1, obs.length)) }
+  const { rs, fs } = build(x)
+  return { cams: rs.map(nearestRotation), focals: fs, rms: Math.sqrt(cost / Math.max(1, obs.length)) }
 }
 
 function solveSym(A: number[][], b: number[]): number[] | null {
@@ -224,6 +230,10 @@ export function waveCorrect(cams: M3[]): M3[] {
   // Keep it pointing the way the cameras' y axes (image down) point on average.
   const ys = cams.reduce((s, R) => [s[0] + R[3], s[1] + R[4], s[2] + R[5]], [0, 0, 0])
   if (up[0] * ys[0] + up[1] * ys[1] + up[2] * ys[2] < 0) up = up.map((v) => -v)
+  // A level horizon is a small correction of how the photos were held. When the answer is far from the
+  // cameras' own "down" (a grid of photos, or nearly identical ones, leave it undetermined), don't apply it.
+  const yn = Math.hypot(...ys) || 1
+  if ((up[0] * ys[0] + up[1] * ys[1] + up[2] * ys[2]) / yn < Math.cos((15 * Math.PI) / 180)) return cams
   // Average viewing direction, made perpendicular to up, becomes world z.
   const zs = cams.reduce((s, R) => [s[0] + R[6], s[1] + R[7], s[2] + R[8]], [0, 0, 0])
   const d = zs[0] * up[0] + zs[1] * up[1] + zs[2] * up[2]
@@ -257,7 +267,7 @@ export function unproject(p: Projection, u: number, v: number): [number, number,
   return [Math.sin(u) * Math.cos(v), Math.sin(v), Math.cos(u) * Math.cos(v)]
 }
 
-function boundsOf(cams: readonly M3[], f: number, sizes: readonly { width: number; height: number }[], p: Projection): { x0: number; y0: number; x1: number; y1: number } | null {
+function boundsOf(cams: readonly M3[], focals: readonly number[], f: number, p: Projection, sizes: readonly { width: number; height: number }[]): { x0: number; y0: number; x1: number; y1: number } | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
   for (let i = 0; i < cams.length; i++) {
     const { width: w, height: h } = sizes[i]
@@ -269,7 +279,7 @@ function boundsOf(cams: readonly M3[], f: number, sizes: readonly { width: numbe
         [0, (k / steps) * h],
         [w, (k / steps) * h],
       ]) {
-        const q = project(p, ray(cams[i], f, px - w / 2, py - h / 2))
+        const q = project(p, ray(cams[i], focals[i], px - w / 2, py - h / 2))
         if (!q) return null
         x0 = Math.min(x0, q[0])
         x1 = Math.max(x1, q[0])
@@ -313,16 +323,17 @@ export function planPanorama(images: readonly PanoImage[], projection: Projectio
   const ba = bundleAdjust(cams, f, tree.root, pairs)
   const level = waveCorrect(ba.cams)
   const sizes = images.map((im) => ({ width: im.width, height: im.height }))
+  const fOut = ba.focals[tree.root]
   // Field of view (from the spherical bounds) decides the projection.
-  const sph = boundsOf(level, ba.f, sizes, 'spherical')!
-  const span: [number, number] = [((sph.x1 - sph.x0) / ba.f) * (180 / Math.PI), ((sph.y1 - sph.y0) / ba.f) * (180 / Math.PI)]
+  const sph = boundsOf(level, ba.focals, fOut, 'spherical', sizes)!
+  const span: [number, number] = [((sph.x1 - sph.x0) / fOut) * (180 / Math.PI), ((sph.y1 - sph.y0) / fOut) * (180 / Math.PI)]
   let proj: Projection = projection === 'auto' ? (Math.max(...span) <= 75 ? 'perspective' : span[1] <= 75 ? 'cylindrical' : 'spherical') : projection
-  let bounds = boundsOf(level, ba.f, sizes, proj)
+  let bounds = boundsOf(level, ba.focals, fOut, proj, sizes)
   if (!bounds || (proj === 'perspective' && (bounds.x1 - bounds.x0) * (bounds.y1 - bounds.y0) > 30 * long * long)) {
     proj = span[1] <= 75 ? 'cylindrical' : 'spherical'
-    bounds = boundsOf(level, ba.f, sizes, proj)!
+    bounds = boundsOf(level, ba.focals, fOut, proj, sizes)!
   }
-  return { f: ba.f, cameras: level.map((R) => ({ R })), sizes, projection: proj, span, bounds, pairs: pairs.map((p) => ({ i: p.i, j: p.j, inliers: p.matches.length })), rms: ba.rms }
+  return { f: fOut, focals: ba.focals, cameras: level.map((R) => ({ R })), sizes, projection: proj, span, bounds, pairs: pairs.map((p) => ({ i: p.i, j: p.j, inliers: p.matches.length })), rms: ba.rms }
 }
 
 // ---------- rendering ----------
@@ -376,7 +387,7 @@ export class PanoMapper {
           [0, (k / steps) * sz.height],
           [sz.width, (k / steps) * sz.height],
         ]) {
-          const q = project(plan.projection, ray(plan.cameras[i].R, plan.f, px - sz.width / 2, py - sz.height / 2))
+          const q = project(plan.projection, ray(plan.cameras[i].R, plan.focals?.[i] ?? plan.f, px - sz.width / 2, py - sz.height / 2))
           if (!q) continue
           const ox = q[0] * plan.f * scale - this.ox, oy = q[1] * plan.f * scale - this.oy
           x0 = Math.min(x0, ox)
@@ -405,8 +416,9 @@ export class PanoMapper {
     const cx = R[0] * d[0] + R[1] * d[1] + R[2] * d[2], cy = R[3] * d[0] + R[4] * d[1] + R[5] * d[2], cz = R[6] * d[0] + R[7] * d[1] + R[8] * d[2]
     if (cz <= 1e-6) return null
     const s = this.srcScale[i]
+    const fi = this.plan.focals?.[i] ?? f
     const { width: w, height: h } = this.plan.sizes[i]
-    const sx = ((f * cx) / cz + w / 2) * s, sy = ((f * cy) / cz + h / 2) * s
+    const sx = ((fi * cx) / cz + w / 2) * s, sy = ((fi * cy) / cz + h / 2) * s
     if (sx < 0 || sy < 0 || sx > w * s || sy > h * s) return null
     return [sx, sy]
   }

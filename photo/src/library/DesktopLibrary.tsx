@@ -295,6 +295,7 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
             ) : (
               <BatchButton icon="album" label="Add to album" onClick={() => open({ type: 'album', ids: selected })} />
             )}
+            {selected.length >= 2 && <BatchButton icon="image" label="Merge…" onClick={() => open({ type: 'merge', ids: selected })} />}
             <BatchButton icon="download" label="Export" onClick={() => open({ type: 'export', ids: selected })} />
             <BatchButton icon="trash" label="Delete" danger onClick={() => open({ type: 'delete', ids: selected })} />
             <span className="sep" />

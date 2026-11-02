@@ -6,8 +6,12 @@
 import { db, type Tombstone } from '../io/db'
 import type { PhotoRecord } from '../io/types'
 
-/** Same photo on any device: file name, size and capture time (the edits backup matches the same way). */
-export const photoKey = (p: Pick<PhotoRecord, 'fileName' | 'fileSize' | 'takenAt'>) => `${p.fileName}\u0000${p.fileSize}\u0000${p.takenAt}`
+/**
+ * Same photo on any device: file name, size and the capture time from its metadata. A photo
+ * without one (screenshots, some exports) matches on name and size alone — its fallback
+ * time is the file's date, which differs between copies of the same file.
+ */
+export const photoKey = (p: Pick<PhotoRecord, 'fileName' | 'fileSize'> & { meta?: Pick<PhotoRecord['meta'], 'takenAt'> }) => `${p.fileName}\u0000${p.fileSize}\u0000${p.meta?.takenAt ?? ''}`
 
 export const photoStampId = (id: string) => `p:${id}`
 export const albumStampId = (id: string) => `a:${id}`

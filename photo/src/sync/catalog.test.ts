@@ -179,7 +179,7 @@ describe('sync merge: properties', () => {
       presets: [],
     }
     const cat = backupAsCatalog(backup as unknown as Parameters<typeof backupAsCatalog>[0])
-    const local = catalog('A', { photos: [photo('x.jpg\u0000100\u00001', { fileName: 'x.jpg' })] })
+    const local = catalog('A', { photos: [photo('x.jpg\u0000100\u0000', { fileName: 'x.jpg' })] })
     const m = mergeCatalogs(local, [cat], NOW)
     expect([m.photos[0].recipe.basic.exposure, m.photos[0].rating, m.photos[0].keywords]).toEqual([0.7, 4, ['K']])
   })

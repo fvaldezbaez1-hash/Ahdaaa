@@ -42,7 +42,7 @@ await page.route('**/__jpeg/*', (route) => route.fulfill({ path: join(resolve(jp
 await page.goto(`http://localhost:${PORT}/scripts/merge/check.html`)
 await page.waitForFunction(() => typeof window.runCheck === 'function', null, { timeout: 120_000 })
 const t0 = Date.now()
-const log = await page.evaluate((plan) => window.runCheck(plan), { raw: `/__raw/${basename(RAW)}`, jpegs: [], steps: STEPS })
+const log = await page.evaluate((plan) => window.runCheck(plan), { raw: `/__raw/${basename(RAW)}`, steps: STEPS })
 await browser.close()
 await server.close()
 let errors = 0

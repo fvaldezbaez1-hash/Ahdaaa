@@ -151,7 +151,7 @@ export function SyncSection() {
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className="btn outline" disabled={!!busy} onClick={() => void exportFile()}>
-            <Icon name="share" size={16} />
+            <Icon name={phone ? 'share' : 'download'} size={16} />
             {busy === 'export' ? 'Preparing…' : 'Export sync file'}
           </button>
           <button type="button" className="btn outline" disabled={!!busy} onClick={() => fileInput.current?.click()}>

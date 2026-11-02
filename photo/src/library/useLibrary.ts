@@ -26,6 +26,7 @@ import { usePref } from './prefs'
 export type LibrarySheet =
   | { type: 'import' }
   | { type: 'export'; ids: string[] }
+  | { type: 'merge'; ids: string[] }
   | { type: 'preset'; ids: string[] }
   | { type: 'album'; ids: string[] }
   | { type: 'newAlbum'; ids: string[] }

@@ -23,7 +23,7 @@ export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s:
           <Icon name="folder" size={16} />
         </button>
       </div>
-      <SearchBox value={lib.search} onChange={lib.setSearch} placeholder="Keyword, camera, lens, file name" />
+      <SearchBox value={lib.search} onChange={lib.setSearch} placeholder="Keyword, camera, lens…" />
 
       <nav aria-label="Smart collections">
         <div className="lib-heading">Library</div>

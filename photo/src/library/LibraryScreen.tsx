@@ -4,7 +4,7 @@ import { Spinner } from '../ui/controls'
 import { useIsPhone } from '../ui/hooks'
 import { Icon } from '../ui/Icon'
 import { toast } from '../ui/toast'
-import { copyEdits, createAlbum, deleteAlbum, deleteKeyword, removeFromAlbum, removePhotos, renameAlbum, renameKeyword, resetEdits, setFlag } from './actions'
+import { copyEdits, createAlbum, deleteAlbum, deleteKeyword, queueThumbnails, removeFromAlbum, removePhotos, renameAlbum, renameKeyword, resetEdits, setFlag } from './actions'
 import { AlbumPicker, NameSheet } from './AlbumSheets'
 import { ConfirmSheet } from './ConfirmSheet'
 import { DesktopLibrary } from './DesktopLibrary'
@@ -13,6 +13,7 @@ import { ExportSheet } from './ExportSheet'
 import { ImportSheet } from './ImportSheet'
 import { KeywordEditor } from './KeywordEditor'
 import { LoupeView } from './Loupe'
+import { MergeSheet } from './MergeSheet'
 import { importer, useImport } from './importer'
 import { EMPTY_SELECTION, plural } from './library'
 import { PhoneLibrary } from './PhoneLibrary'
@@ -25,6 +26,7 @@ import { syncOnOpen } from '../sync/sync'
 import './library.css'
 
 const isString = (v: unknown) => typeof v === 'string'
+const thumbQueued = new Set<string>()
 
 export function LibraryScreen() {
   const lib = useLibrary()
@@ -40,6 +42,12 @@ export function LibraryScreen() {
 
   // Bring in what other devices changed (sync folder set up and still allowed; otherwise nothing happens).
   useEffect(() => syncOnOpen(), [])
+  // Photos sync brought from another device get their thumbnails here if the app closed before they were made.
+  useEffect(() => {
+    const missing = lib.photos?.filter((p) => p.thumbVersion === 0 && !thumbQueued.has(p.id)).map((p) => p.id) ?? []
+    missing.forEach((id) => thumbQueued.add(id))
+    if (missing.length) queueThumbnails(missing)
+  }, [lib.photos])
 
   useLayoutEffect(() => {
     // Not a React prop: lets the picker choose a whole folder (desktop browsers).
@@ -113,6 +121,8 @@ function LibrarySheets({
       return <ImportSheet onClose={close} {...importProps} />
     case 'export':
       return <ExportSheet ids={sheet.ids} onClose={close} />
+    case 'merge':
+      return <MergeSheet ids={sheet.ids} onClose={close} />
     case 'preset':
       return <PresetSheet ids={sheet.ids} onClose={close} />
     case 'album':
@@ -250,6 +260,7 @@ function LibrarySheets({
       const items: MenuItem[] = [
         { label: 'Keywords…', icon: 'tag', onClick: () => open({ type: 'keywords', ids }) },
         ...(ids.length >= 2 ? [{ label: 'Compare', icon: 'compare' as const, onClick: () => lib.openCompare(ids) }, { label: 'Survey', icon: 'survey' as const, onClick: () => lib.openSurvey(ids) }] : []),
+        ...(ids.length >= 2 ? [{ label: 'Merge to HDR or panorama…', icon: 'image' as const, onClick: () => open({ type: 'merge', ids }) }] : []),
         { label: 'Mark as pick', icon: 'flag', onClick: () => void setFlag(ids, 1) },
         { label: 'Reject', icon: 'reject', onClick: () => void setFlag(ids, -1) },
         { label: 'Clear flag', icon: 'x', onClick: () => void setFlag(ids, 0) },

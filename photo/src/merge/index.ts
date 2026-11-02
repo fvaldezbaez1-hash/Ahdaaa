@@ -75,16 +75,15 @@ interface PanoDetail extends Common {
 
 const sameCamera = (a: PhotoRecord, b: PhotoRecord) => a.kind === b.kind && (a.meta.make ?? '') === (b.meta.make ?? '') && (a.meta.model ?? '') === (b.meta.model ?? '')
 
-/** HDR when the photos look like a bracket (same camera, same framing and focal length, exposures differing, taken close together); else panorama. */
+/** HDR when the photos look like a bracket (same camera, size and focal length, EXIF exposures differing); else panorama. */
 export function suggestKind(photos: readonly PhotoRecord[]): MergeKind {
   if (photos.length < 2) return 'pano'
   const ex = photos.map((p) => exifExposure(p.meta))
   const sameSize = photos.every((p) => p.width === photos[0].width && p.height === photos[0].height)
   const sameFocal = photos.every((p) => (p.meta.focalLength ?? 0) === (photos[0].meta.focalLength ?? 0))
-  const times = photos.map((p) => p.takenAt)
-  const close = Math.max(...times) - Math.min(...times) < 60_000
+  // Brackets: exposures that differ (by EXIF; without it, the person picks HDR themselves).
   const varied = ex.every((e) => e) && Math.max(...(ex as number[])) / Math.min(...(ex as number[])) > 1.4
-  return sameSize && sameFocal && photos.every((p) => sameCamera(p, photos[0])) && (varied || (close && ex.some((e) => !e))) ? 'hdr' : 'pano'
+  return sameSize && sameFocal && varied && photos.every((p) => sameCamera(p, photos[0])) ? 'hdr' : 'pano'
 }
 
 /** Why these photos can't be merged this way (null = they can). */
