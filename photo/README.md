@@ -144,8 +144,16 @@ Code map:
 | `src/editor/` | Editor screen: panels, stage, crop tool, masks and heal/clone tools, desktop and phone layouts, shortcuts |
 | `src/presets/` | The 100 looks, how they apply, the presets panel and screen, Lightroom `.xmp` |
 | `src/ai/` | On-device AI: model registry and downloads, ONNX Runtime and MediaPipe in a worker, segmentation, object selection, inpainting, denoise, upscale |
+| `src/lens/` | Lens profiles from the lensfun database: camera and lens matching from EXIF, lensfun's interpolation of distortion, chromatic aberration and vignetting |
+| `src/upright/` | Upright perspective correction: line detection, vanishing points, slider values (the slider math itself is `src/edit/perspective.ts`) |
 | `src/assistant/` | AI assistant (in progress) |
 | `src/settings/`, `src/state/`, `src/ui/` | Settings, shared state, shared components |
+
+Lens profiles come from the [lensfun](https://lensfun.github.io) database
+(data licence CC BY-SA 3.0, © the lensfun project contributors).
+`scripts/lens/build.mjs` downloads it at a pinned commit, checks each file's
+sha256 and converts it to `public/lens/lensfun.json` (not committed; the
+attribution is inside the file), which the site serves itself.
 
 `scripts/*/check.mjs` are end-to-end checks that drive the real app in
 headless Chromium with real photos and RAW files. Each script has its usage

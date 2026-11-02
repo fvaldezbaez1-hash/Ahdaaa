@@ -34,6 +34,8 @@ export default defineConfig({
         // On-device AI: models (models/) and the AI runtimes' WebAssembly are fetched only when the
         // person downloads a model, and kept in Cache Storage by src/ai, not in the app precache.
         globIgnores: ['models/**', '**/ort-wasm-*.wasm', '**/vision_wasm_*'],
+        // The lens database (lens/lensfun.json, ≈ 0.45 MB gzipped) loads on first use; keep it for offline use.
+        runtimeCaching: [{ urlPattern: /\/lens\/lensfun\.json$/, handler: 'StaleWhileRevalidate', options: { cacheName: 'lumen-lens-db' } }],
         // The RAW decoder and JPEG encoder are WebAssembly; precache them so editing works offline.
         maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
         cleanupOutdatedCaches: true,

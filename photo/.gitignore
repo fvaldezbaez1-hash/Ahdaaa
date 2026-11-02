@@ -25,3 +25,6 @@ dist-ssr
 
 # AI models: fetched at build time (scripts/models/fetch.mjs), never committed
 public/models/
+
+# Lens database (lensfun, CC BY-SA 3.0): built at build time by scripts/lens/build.mjs, never committed
+public/lens/
