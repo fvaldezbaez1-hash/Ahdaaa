@@ -27,7 +27,7 @@ export function enterHeal(mode?: HealSettings['mode']) {
 }
 
 export function exitTool() {
-  view.set({ tool: null, placing: null, rangePick: false })
+  view.set({ tool: null, placing: null, rangePick: false, pick: null })
 }
 
 /**

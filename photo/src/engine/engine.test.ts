@@ -4,7 +4,7 @@ import { rawWbRatio } from '../color/wb'
 import { defaultRecipe } from '../edit/defaults'
 import type { Geometry } from '../edit/types'
 import { autoSettings, neutralEstimate } from './auto'
-import { applyAffine, cropRectInUncropped, invertAffine, normalizedToSource, outputSize, outputToSource } from './geometry'
+import { cropRectInUncropped, normalizedToSource, outputMapping, outputSize } from './geometry'
 import { binHistogram } from './histogram'
 import { areaDownscale, averagePixel, boxReduce } from './image'
 import { bandWeights, buildCurveLut, frameParams, wheelDirection } from './params'
@@ -39,13 +39,14 @@ describe('geometry', () => {
     const r = cropRectInUncropped(src, g)
     const u = outputSize(src, g, true)
     // The crop's center, found through the uncropped mapping, is the same source point as the cropped center.
-    const a = applyAffine(outputToSource(src, g, true, u), (r.x + r.w / 2) * u.width, (r.y + r.h / 2) * u.height)
+    const a = outputMapping(src, g, true, u).toSource((r.x + r.w / 2) * u.width, (r.y + r.h / 2) * u.height)
     close(a, normalizedToSource(src, g, false, 0.5, 0.5), 0.02)
   })
   it('inverts affine maps', () => {
-    const m = outputToSource(src, geo({ angle: 7, rotate: 3, flipH: true }), false, { width: 100, height: 80 })
-    const p = applyAffine(m, 13, 27)
-    close(applyAffine(invertAffine(m), p[0], p[1]), [13, 27], 1e-9)
+    const m = outputMapping(src, geo({ angle: 7, rotate: 3, flipH: true }), false, { width: 100, height: 80 })
+    const p = m.toSource(13, 27)
+    expect(m.affine).toBe(true)
+    close(m.fromSource(p[0], p[1]), [13, 27], 1e-9)
   })
 })
 
@@ -315,5 +316,101 @@ describe('AI masks and removal', () => {
     const r = resizeArea16({ width: 4, height: 2, data }, 2, 1)
     expect([r.width, r.height]).toEqual([2, 1])
     expect(Array.from(r.data)).toEqual([32768, 0, 32768, 32768, 0, 32768])
+  })
+})
+
+describe('Phase 4: levels, color editor, lens, perspective', () => {
+  it('levels: identity, input / output range and midtone gamma', async () => {
+    const { applyLevels, buildCurveLut } = await import('./params')
+    const id = { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 }
+    expect(applyLevels(id, 0.37)).toBeCloseTo(0.37, 12)
+    const l = { inBlack: 25.5, inWhite: 229.5, gamma: 1, outBlack: 0, outWhite: 255 }
+    expect(applyLevels(l, 0.1)).toBe(0)
+    expect(applyLevels(l, 0.5)).toBeCloseTo(0.5, 9)
+    expect(applyLevels(l, 0.95)).toBe(1)
+    expect(applyLevels({ ...id, gamma: 2 }, 0.25)).toBeCloseTo(0.5, 9) // gamma > 1 brightens
+    expect(applyLevels({ ...id, outBlack: 51, outWhite: 204 }, 0)).toBeCloseTo(0.2, 9)
+    const curve = { rgb: [{ x: 0, y: 0 }, { x: 1, y: 1 }], r: [{ x: 0, y: 0 }, { x: 1, y: 1 }], g: [{ x: 0, y: 0 }, { x: 1, y: 1 }], b: [{ x: 0, y: 0 }, { x: 1, y: 1 }] }
+    expect(buildCurveLut(curve, { rgb: id, r: id, g: id, b: id })).toBeNull() // defaults cost nothing
+    const lut = buildCurveLut(curve, { rgb: id, r: { ...id, gamma: 2 }, g: id, b: id })!
+    expect(lut[512 * 4]).toBeCloseTo(Math.sqrt(512 / 1023), 6)
+    expect(lut[512 * 4 + 1]).toBeCloseTo(512 / 1023, 6)
+  })
+  it('color editor: smooth slice membership with hue wraparound, uniformity pulls toward the picked color', async () => {
+    const { hueDistance, rangeMembership, uniformityPull, packRanges } = await import('./colorEditor')
+    const red = { id: 'r', name: 'Reds', enabled: true, hue: 355, sat: 60, hueWidth: 20, satLow: 20, satHigh: 100, smooth: 50, hueShift: 10, satShift: 0, lightShift: 0 }
+    expect(hueDistance(5, 355)).toBe(10)
+    expect(rangeMembership(red, 5, 0.6)).toBe(1) // across 0°
+    expect(rangeMembership(red, 340, 0.6)).toBe(1)
+    expect(rangeMembership(red, 300, 0.6)).toBe(0)
+    const m = [10, 20, 25, 30, 35, 40, 45].map((h) => rangeMembership(red, h, 0.6))
+    for (let i = 1; i < m.length; i++) expect(m[i]).toBeLessThanOrEqual(m[i - 1]) // smooth fall-off, no steps
+    expect(m[2]).toBeGreaterThan(0)
+    expect(m[2]).toBeLessThan(1)
+    expect(rangeMembership(red, 0, 0.05)).toBe(0) // below satLow (with its soft edge)
+    // Near-gray pixels fade out even with satLow 0: their hue is noise (blotchy clouds otherwise).
+    const sky = { ...red, hue: 210, sat: 14, satLow: 0, satHigh: 100 }
+    expect(rangeMembership(sky, 210, 0)).toBe(0)
+    expect(rangeMembership(sky, 210, 0.02)).toBe(0)
+    expect(rangeMembership(sky, 210, 0.05)).toBeGreaterThan(0)
+    expect(rangeMembership(sky, 210, 0.05)).toBeLessThan(1)
+    expect(rangeMembership(sky, 210, 0.14)).toBe(1)
+    const skin = { ...red, hue: 30, sat: 40, uniformity: { hue: 100, sat: 50, light: 0 } }
+    const p = uniformityPull(skin, 20, 0.6, 1)
+    expect(p.h).toBeCloseTo(30, 9)
+    expect(p.s).toBeCloseTo(0.5, 9)
+    expect(uniformityPull(skin, 20, 0.6, 0.5).h).toBeCloseTo(25, 9)
+    expect(uniformityPull(skin, 350, 0.6, 1).h).toBeCloseTo(30, 9) // the short way round
+    expect(packRanges([{ ...red, enabled: false }])).toBeNull()
+    expect(packRanges([red])!.n).toBe(1)
+  })
+  it('distortion: forward and inverse round-trip for poly3, poly5 and ptlens (+ manual)', async () => {
+    const { distortionScale, radialOf, undistortRadius } = await import('./lens')
+    for (const [model, k] of [['poly3', [-0.04]], ['poly5', [-0.06, 0.012]], ['ptlens', [0.01, -0.03, 0.005]]] as const) {
+      const m = radialOf({ profile: { model, k: [...k], amount: 120 }, manual: 25 })!
+      for (const ru of [0, 0.2, 0.7, 1, 1.3]) {
+        const rd = ru * distortionScale(m, ru)
+        expect(undistortRadius(m, rd)).toBeCloseTo(ru, 9)
+      }
+    }
+    expect(radialOf({ profile: null, manual: 0 })).toBeNull()
+    expect(radialOf({ profile: { model: 'poly3', k: [-0.04], amount: 0 }, manual: 0 })).toBeNull()
+    // Barrel (k1 < 0): the centre is sampled further out than the edge, relatively.
+    const b = radialOf({ profile: null, manual: 50 })!
+    expect(distortionScale(b, 0)).toBeGreaterThan(distortionScale(b, 1))
+  })
+  it('perspective: the shared homography round-trips and the mapping uses it', async () => {
+    const { perspectiveMatrix, perspectiveInverse, applyHomography } = await import('../edit/perspective')
+    const p = { vertical: -30, horizontal: 15, rotate: 2, aspect: 10, scale: 110, offsetX: 3, offsetY: -2, mode: 'manual' as const, guides: [] }
+    const f = { width: 600, height: 400 }
+    const [x, y] = applyHomography(perspectiveMatrix(p, f), 123, 77)
+    close(applyHomography(perspectiveInverse(p, f), x, y), [123, 77], 1e-9)
+  })
+  it('view ↔ mask round-trips with lens + perspective + crop + rotate + flip + straighten', async () => {
+    const { viewToMask, maskToView, outputMapping } = await import('./geometry')
+    const src = { width: 6000, height: 4000 }
+    const g: Geometry = {
+      crop: { x: 0.1, y: 0.15, w: 0.7, h: 0.6 }, angle: -4, rotate: 1, flipH: true, flipV: false, aspect: 'free',
+      lens: { profile: { model: 'ptlens', k: [0.01, -0.03, 0.005], amount: 100 }, manual: 30 },
+      perspective: { vertical: -40, horizontal: 20, rotate: 3, aspect: -15, scale: 95, offsetX: 4, offsetY: 2, mode: 'manual', guides: [] },
+    }
+    for (const uncropped of [false, true])
+      for (const [nx, ny] of [[0.5, 0.5], [0.05, 0.9], [0.95, 0.1]]) {
+        const m = viewToMask(src, g, uncropped, nx, ny)
+        const v = maskToView(src, g, uncropped, m.x, m.y)
+        expect(v.x).toBeCloseTo(nx, 7)
+        expect(v.y).toBeCloseTo(ny, 7)
+      }
+    const map = outputMapping(src, g, false, { width: 1000, height: 800 })
+    expect(map.affine).toBe(false)
+    const b = map.bounds(0, 0, 1000, 800)
+    // Every edge point lies inside the bounds.
+    for (let t = 0; t <= 1; t += 0.1) {
+      const [X, Y] = map.toSource(1000 * t, 800)
+      expect(X).toBeGreaterThanOrEqual(b.x0)
+      expect(X).toBeLessThanOrEqual(b.x1)
+      expect(Y).toBeGreaterThanOrEqual(b.y0)
+      expect(Y).toBeLessThanOrEqual(b.y1)
+    }
   })
 })

@@ -6,16 +6,17 @@
 //   low-res copy ── guide (guided-filter coefficients, dehaze transmission) ──┘
 
 import type { Vec3 } from '../color/matrices'
-import type { LocalLayer } from '../edit/types'
-import { REC2020_TO_P3, REC2020_TO_SRGB } from '../color/matrices'
-import { applyAffine, type Affine, type Size } from './geometry'
+import type { EditRecipe, LocalLayer } from '../edit/types'
+import { mul, REC2020_TO_P3, REC2020_TO_SRGB, SRGB_TO_REC2020 } from '../color/matrices'
+import { applyAffine, type Affine, type Mapping, type Size } from './geometry'
 import type { Gpu, Program, Target, Texture } from './gl'
+import type { LensShading } from './lens'
 import { GUIDE_LONG_EDGE } from './image'
 import { WB_TEMP, WB_TINT, type FrameParams, type InputTransform } from './params'
 import { layerMasks, localParams } from './local'
 import { activeLayers, drawableMasks, layerUsage } from './masks'
 import type { Rasters } from './rasters'
-import { BLUR, BOX, CHROMA_BLUR, CONVERT, DENOISE, DEVELOP, FINISH, GF_COEF, GUIDE_IN, HALF, MIN_FILTER, RESAMPLE, TONE } from './shaders'
+import { BLUR, BOX, CHROMA_BLUR, CONVERT, DEFRINGE, DENOISE, DEVELOP, FINISH, GF_COEF, GUIDE_IN, HALF, MIN_FILTER, RESAMPLE, TONE } from './shaders'
 
 export interface Rect {
   x: number
@@ -125,8 +126,10 @@ export function computeGuide(gpu: Gpu, low: Texture, input: InputTransform, air:
 export interface Frame {
   /** Output frame size at processing resolution. */
   outSize: Size
-  /** Output px → full-resolution source px. */
-  toSource: Affine
+  /** Output px → full-resolution source px (lens, perspective, rotate / flip, straighten, crop). */
+  map: Mapping
+  /** Lens vignetting / lateral CA corrections, or null. */
+  shading?: LensShading | null
   fullSize: Size
   src: ScaledSource
   /** Output px covered by the region textures (inner + margin). */
@@ -240,6 +243,8 @@ interface Stage {
  */
 const STAGE_BUDGET = 4_000_000
 
+const EMPTY_RANGES = new Float32Array(64 * 4)
+
 /** Cached stage outputs for one view (after / before) or one export. */
 export class StageCache {
   private gpu: Gpu
@@ -311,6 +316,21 @@ export class StageCache {
   }
 }
 
+/** Neighbourhood (px) defringe looks at for edges: fringes are a few full-resolution pixels wide. */
+const defringeRadius = (ps: number) => Math.max(1, Math.min(4, Math.ceil(3 * ps)))
+
+/** Extra margin for the lens corrections that look at neighbours (defringe); 0 when off, so nothing else moves. */
+export function lensMargin(lens: EditRecipe['lens'] | undefined, ps: number): number {
+  return lens && (lens.defringe.purple > 0 || lens.defringe.green > 0) ? defringeRadius(ps) : 0
+}
+
+/** Uniforms of MAP_FN (shaders.ts) for a mapping. */
+export function setMapping(p: Program, m: Mapping): Program {
+  p.m3('u_toSource', m.P).b('u_lensOn', !!m.lens)
+  if (m.lens) p.f('u_lensC', m.lens.cx, m.lens.cy).f('u_lensNorm', m.lens.norm).i('u_lensModel', m.lens.radial.model).f('u_lensK', ...m.lens.radial.k).f('u_lensManual', m.lens.radial.manual)
+  return p
+}
+
 /** True when output pixel centers land exactly on source texel centers (no resampling needed). */
 function pixelExact(m: Affine): boolean {
   const pts = [applyAffine(m, 0.5, 0.5), applyAffine(m, 1.5, 0.5), applyAffine(m, 0.5, 1.5)]
@@ -344,16 +364,21 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
   const ds = detailSettings(params, frame.pixelScale, frame.frameLong)
   const inp = params.input
 
-  const dev = cache.run('develop', JSON.stringify([region, frame.toSource, src.id, params.keys.input]), W, H, 'rgba16f', false, (t) => {
+  const map = frame.map, sh = frame.shading ?? null
+  const dev = cache.run('develop', JSON.stringify([region, map.P, map.lens, src.id, params.keys.input, sh]), W, H, 'rgba16f', false, (t) => {
     const p = gpu.program('develop', DEVELOP)
     setDevelop(p, inp)
+    setMapping(p, map)
     // Output px → scaled-source px, to decide whether a plain fetch is exact.
-    const m = frame.toSource
+    const m = map.P
     const toScaled: Affine = [m[0] * src.scale, m[1] * src.scale, m[2] * src.scale - src.x0, m[3] * src.scale, m[4] * src.scale, m[5] * src.scale - src.y0]
     const shifted: Affine = [toScaled[0], toScaled[1], toScaled[2] + toScaled[0] * region.x + toScaled[1] * region.y, toScaled[3], toScaled[4], toScaled[5] + toScaled[3] * region.x + toScaled[4] * region.y]
     p.tex('u_src', src.tex, 0).i('u_srcSize', src.tex.width, src.tex.height).f('u_srcOrigin', src.x0, src.y0).f('u_scale', src.scale)
-      .f('u_fullSize', frame.fullSize.width, frame.fullSize.height).m3('u_toSource', [m[0], m[1], m[2], m[3], m[4], m[5], 0, 0, 1])
-      .f('u_regionOrigin', region.x, region.y).b('u_exact', pixelExact(shifted))
+      .f('u_fullSize', frame.fullSize.width, frame.fullSize.height)
+      .f('u_regionOrigin', region.x, region.y).b('u_exact', map.affine && !sh?.tca && pixelExact(shifted))
+      .b('u_tcaOn', !!sh?.tca).f('u_tcaR', ...(sh?.tcaR ?? [1, 0, 0])).f('u_tcaB', ...(sh?.tcaB ?? [1, 0, 0]))
+      .b('u_vigOn', !!sh?.vignetting).f('u_vigK', ...((sh?.vignetting?.k ?? [0, 0, 0]).map((k) => (k * (sh?.vignetting?.amount ?? 0)) / 100) as [number, number, number]))
+      .f('u_manualVig', (sh?.manual ?? 0) / 100, ((sh?.midpoint ?? 50) / 100) * 0.8)
     gpu.draw(t)
   })
 
@@ -386,6 +411,20 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
 
   const layers = activeLayers(params.layers)
   const use = layerUsage(layers)
+  const df = params.defringe
+  if (df) {
+    const r = defringeRadius(frame.pixelScale), prev = scene
+    scene = cache.run('defringe', JSON.stringify([prev.version, df, r]), W, H, 'rgba16f', false, (t) => {
+      const h = (v: [number, number]) => {
+        const w = (((v[1] - v[0]) % 360) + 360) % 360
+        return [(((v[0] + w / 2) % 360) * Math.PI) / 180, ((w / 2) * Math.PI) / 180]
+      }
+      gpu.program('defringe', DEFRINGE).tex('u_src', prev.target, 0).f('u_luma', ...inp.luma).m3('u_toSrgb', mul(REC2020_TO_SRGB, inp.toWorking))
+        .f('u_purple', df.purple, ...h(df.purpleHue), 0).f('u_green', df.green, ...h(df.greenHue), 0).i('u_radius', r)
+      gpu.draw(t)
+    })
+  }
+
   const fineOn = params.texture !== 0 || params.clarity !== 0 || use[6] || use[7]
   let fine: Stage | null = null
   if (fineOn) {
@@ -409,16 +448,18 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
     scene.version, fine?.version, frame.guide.key, frame.output, params.exposure, params.highlights, params.shadows, params.clarity, params.texture,
     params.dehaze, params.keys, params.contrast, params.whites, params.blacks, params.saturation, params.vibrance, params.bw,
     params.grading && Array.from(params.grading.wheels), params.grading?.balance, params.grading?.k, params.fade, frame.air, local,
+    params.colorRanges && Array.from(params.colorRanges.data), map.P, map.lens,
   ])
   const drawTone = (t: Target, lp: Target[] | null) => {
     const p = gpu.program(lp ? 'toneLayers' : 'tone', () => TONE(!!lp))
-    const m = frame.toSource
+    setMapping(p, map)
     const none = gpu.dummy()
     p.tex('u_scene', scene.target, 0).tex('u_fine', fine?.target ?? scene.target, 1).tex('u_coef', frame.guide.coef, 2)
       .tex('u_haze', frame.guide.haze ?? frame.guide.coef, 3).tex('u_toneLut', luts.tone!, 4).tex('u_hueLut', luts.hue ?? luts.tone!, 5)
       .tex('u_curveLut', luts.curve ?? luts.tone!, 6)
       .tex('u_lp0', lp?.[0] ?? none, 7).tex('u_lp1', lp?.[1] ?? none, 8).tex('u_lp2', lp?.[2] ?? none, 9).tex('u_lp3', lp?.[3] ?? none, 10).b('u_layersOn', !!lp)
-    p.m3('u_toWorking', inp.toWorking).f('u_luma', ...inp.luma).m3('u_toSource', [m[0], m[1], m[2], m[3], m[4], m[5], 0, 0, 1])
+    p.m3('u_toWorking', inp.toWorking).f('u_luma', ...inp.luma)
+      .i('u_ceN', params.colorRanges?.n ?? 0).v4a('u_ce', params.colorRanges?.data ?? EMPTY_RANGES).m3('u_toSrgb', REC2020_TO_SRGB).m3('u_fromSrgb', SRGB_TO_REC2020)
       .f('u_regionOrigin', region.x, region.y).f('u_fullSize', frame.fullSize.width, frame.fullSize.height)
       .f('u_exposure', params.exposure).b('u_local', local).b('u_fineOn', fineOn)
       .f('u_highlights', params.highlights).f('u_shadows', params.shadows).f('u_clarity', params.clarity).f('u_texture', params.texture)
@@ -442,7 +483,7 @@ export function renderFrame(gpu: Gpu, cache: StageCache, luts: Luts, frame: Fram
   else {
     const needBase = maskLayers.some((l) => drawableMasks(l.masks).some((m) => m.type === 'range'))
     const base = needBase ? cache.run('toneBase', globalKey, W, H, 'rgba16f', false, (t) => drawTone(t, null)) : null
-    masks = layerMasks(gpu, cache, { region, toSource: frame.toSource, fullSize: frame.fullSize, outLuma, rasters: frame.rasters, scene, luma: inp.luma }, maskLayers, base)
+    masks = layerMasks(gpu, cache, { region, map, fullSize: frame.fullSize, outLuma, rasters: frame.rasters, scene, luma: inp.luma }, maskLayers, base)
     if (layers.length) {
       const local = localParams(gpu, cache, layers, masks, W, H)
       lp = local.targets

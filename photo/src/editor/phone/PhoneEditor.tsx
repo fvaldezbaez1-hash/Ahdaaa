@@ -3,10 +3,13 @@ import { AssistantPanel } from '../../assistant/AssistantPanel'
 import { PresetsPanel } from '../../presets/PresetsPanel'
 import { goBack } from '../../router'
 import { editor, useEditor } from '../../state/editor'
+import { Segmented } from '../../ui/controls'
 import { Icon, type IconName } from '../../ui/Icon'
+import { ColorEditor } from '../color/ColorEditor'
 import { toast } from '../../ui/toast'
 import { enterCrop, finishCrop } from '../crop/cropTool'
 import { CropActions, CropPanel } from '../crop/CropPanel'
+import { LensPanel } from '../lens/LensPanel'
 import { HealPanel } from '../masks/HealPanel'
 import { ToolIcon } from '../masks/icons'
 import { MasksPanel } from '../masks/MasksPanel'
@@ -14,6 +17,7 @@ import { enterHeal, enterMasks, exitTool } from '../masks/modes'
 import { applyAuto } from '../panels/actions'
 import { ColorGrading } from '../panels/ColorGrading'
 import { ColorMixer } from '../panels/ColorMixer'
+import { Levels } from '../panels/Levels'
 import { resetParts, usePartChanged, type PartId } from '../panels/parts'
 import { cameraLine, exposureLine } from '../panels/photoInfo'
 import { ProfileRow } from '../panels/ProfileRow'
@@ -22,18 +26,44 @@ import { ToneCurve } from '../panels/ToneCurve'
 import { WhiteBalance } from '../panels/WhiteBalance'
 import { useSession } from '../session'
 import { Stage } from '../stage/Stage'
+import { TransformPanel } from '../transform/TransformPanel'
 import { useView, view } from '../view'
 
-type ToolId = 'presets' | 'light' | 'color' | 'effects' | 'detail' | 'curve' | 'grading' | 'masks' | 'heal' | 'crop'
+type ToolId = 'presets' | 'light' | 'color' | 'effects' | 'detail' | 'curve' | 'grading' | 'lens' | 'masks' | 'heal' | 'crop'
 
 interface Tool {
   id: ToolId
   label: string
-  icon: IconName | 'heal'
+  icon: IconName | 'heal' | 'lens'
   title: string
   hint?: string
   parts?: PartId[]
   body: () => ReactNode
+}
+
+// The last sub-tab used in each tool, so coming back to a tool lands where you were.
+const lastTab: Record<string, string> = {}
+
+/** A tool panel split into sub-tabs (names differ from the tool bar's, so each control has its own name). */
+function Tabs<T extends string>({ id, label, tabs, children }: { id: string; label: string; tabs: { value: T; label: string }[]; children: (tab: T) => ReactNode }) {
+  const [tab, setTab] = useState<T>(() => (lastTab[id] as T | undefined) ?? tabs[0].value)
+  return (
+    <>
+      <Segmented
+        className="ed-phone-tabs"
+        label={label}
+        value={tab}
+        options={tabs}
+        onChange={(t) => {
+          lastTab[id] = t
+          // Leaving a sub-tab drops its pickers and Guided Upright.
+          if (view.get().pick || view.get().tool === 'guides') exitTool()
+          setTab(t)
+        }}
+      />
+      {children(tab)}
+    </>
+  )
 }
 
 const TOOLS: Tool[] = [
@@ -44,17 +74,24 @@ const TOOLS: Tool[] = [
     label: 'Color',
     icon: 'palette',
     title: 'Color',
-    hint: 'White balance and color',
-    parts: ['wb', 'vibrance', 'mixer'],
+    parts: ['wb', 'vibrance', 'mixer', 'colorEditor'],
     body: () => (
-      <>
-        <ProfileRow />
-        <h3 className="ed-subhead">White balance</h3>
-        <WhiteBalance />
-        <PresenceSliders local={false} />
-        <h3 className="ed-subhead">Color mixer</h3>
-        <ColorMixer />
-      </>
+      <Tabs id="color" label="Color panel" tabs={[{ value: 'basics', label: 'Basics' }, { value: 'editor', label: 'Color editor' }]}>
+        {(tab) =>
+          tab === 'editor' ? (
+            <ColorEditor wheel={148} />
+          ) : (
+            <>
+              <ProfileRow />
+              <h3 className="ed-subhead">White balance</h3>
+              <WhiteBalance />
+              <PresenceSliders local={false} />
+              <h3 className="ed-subhead">Color mixer</h3>
+              <ColorMixer />
+            </>
+          )
+        }
+      </Tabs>
     ),
   },
   {
@@ -72,8 +109,40 @@ const TOOLS: Tool[] = [
     ),
   },
   { id: 'detail', label: 'Detail', icon: 'detail', title: 'Detail', hint: 'Sharpening and noise', parts: ['detail'], body: () => <DetailSliders /> },
-  { id: 'curve', label: 'Curve', icon: 'curve', title: 'Tone curve', hint: 'Tap to add a point, drag off to remove', parts: ['curve'], body: () => <ToneCurve /> },
+  {
+    id: 'curve',
+    label: 'Curve',
+    icon: 'curve',
+    title: 'Tone',
+    parts: ['curve', 'levels'],
+    body: () => (
+      <Tabs id="curve" label="Tone panel" tabs={[{ value: 'curve', label: 'Tone curve' }, { value: 'levels', label: 'Levels' }]}>
+        {(tab) =>
+          tab === 'levels' ? (
+            <Levels />
+          ) : (
+            <>
+              <p className="muted small ed-phone-hint">Tap to add a point, drag off to remove</p>
+              <ToneCurve />
+            </>
+          )
+        }
+      </Tabs>
+    ),
+  },
   { id: 'grading', label: 'Grading', icon: 'grading', title: 'Color grading', hint: 'Drag the wheel to tint', parts: ['grading'], body: () => <ColorGrading layout="single" /> },
+  {
+    id: 'lens',
+    label: 'Lens',
+    icon: 'lens',
+    title: 'Lens & transform',
+    parts: ['lens', 'transform'],
+    body: () => (
+      <Tabs id="lens" label="Lens panel" tabs={[{ value: 'lens', label: 'Lens corrections' }, { value: 'transform', label: 'Transform' }]}>
+        {(tab) => (tab === 'transform' ? <TransformPanel /> : <LensPanel />)}
+      </Tabs>
+    ),
+  },
   { id: 'masks', label: 'Masks', icon: 'mask', title: 'Masks', hint: 'Adjust part of the photo', body: () => <MasksPanel layout="strip" /> },
   { id: 'heal', label: 'Heal', icon: 'heal', title: 'Heal & clone', body: () => <HealPanel layout="strip" /> },
   { id: 'crop', label: 'Crop', icon: 'crop', title: 'Crop & straighten', body: () => <CropPanel layout="strip" /> },
@@ -178,7 +247,7 @@ export function PhoneEditor() {
 function ToolButton({ tool, on, onClick }: { tool: Tool; on: boolean; onClick: () => void }) {
   return (
     <button type="button" className={on ? 'ed-tool on' : 'ed-tool'} aria-pressed={on} onClick={onClick}>
-      {tool.icon === 'heal' ? <ToolIcon name="heal" size={24} /> : <Icon name={tool.icon} size={24} />}
+      {tool.icon === 'heal' || tool.icon === 'lens' ? <ToolIcon name={tool.icon} size={24} /> : <Icon name={tool.icon} size={24} />}
       {tool.label}
     </button>
   )

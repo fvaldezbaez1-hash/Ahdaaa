@@ -2,11 +2,17 @@
 // tiler, the eyedropper and the crop tool. Pixel coordinates are continuous:
 // pixel (i, j) covers [i, i+1) × [j, j+1), so its center is (i + 0.5, j + 0.5).
 //
-// Order (see Geometry in edit/types.ts): quarter turns → flips → the "frame";
-// the crop rect lives in the frame; the image is rotated by `angle` (clockwise)
-// around the crop center and the axis-aligned crop rect is cut out of it.
+// Order (see Geometry in edit/types.ts): lens distortion correction (the source
+// keeps its size) → quarter turns → flips → the "frame" → perspective (a
+// homography of the frame onto itself: the frame keeps its size, the image moves
+// inside it) → the crop rect lives in that frame; the image is rotated by `angle`
+// (clockwise) around the crop center and the axis-aligned crop rect is cut out.
+// Output sizes therefore don't depend on lens or perspective.
 
+import type { Mat3 } from '../color/matrices'
+import { applyHomography, inv3, isIdentityPerspective, mul3, perspectiveInverse } from '../edit/perspective'
 import type { Geometry, Rect } from '../edit/types'
+import { distortionScale, radialOf, undistortRadius, type Radial } from './lens'
 
 export interface Size {
   width: number
@@ -91,14 +97,100 @@ export function outputToFrame(src: Size, g: Geometry, uncropped: boolean, out: S
   return [cos * kx, sin * ky, cx - (cos * w) / 2 - (sin * h) / 2, -sin * kx, cos * ky, cy + (sin * w) / 2 - (cos * h) / 2]
 }
 
-/** Output px (in an image of size `out`) → source px. */
-export function outputToSource(src: Size, g: Geometry, uncropped: boolean, out: Size): Affine {
-  return composeAffine(frameToSource(src, g), outputToFrame(src, g, uncropped, out))
+const toMat3 = (a: Affine): Mat3 => [a[0], a[1], a[2], a[3], a[4], a[5], 0, 0, 1]
+
+/** Radial lens warp in source px: corrected (undistorted) → the photo's own (distorted) pixels. */
+export interface LensWarp {
+  cx: number
+  cy: number
+  /** Px per unit radius: half the source's shorter side (lensfun). */
+  norm: number
+  radial: Radial
+}
+
+/**
+ * Output px → source px, through crop / straighten, perspective, rotate / flip and lens correction.
+ * `P` maps output px to corrected-source px (a homography; affine without perspective), then
+ * `lens` (if any) bends that to the photo's own pixels. `affine` = no perspective and no lens:
+ * the mapping is exactly the plain affine one, and the renderer uses its exact paths.
+ */
+export interface Mapping {
+  P: Mat3
+  lens: LensWarp | null
+  affine: boolean
+  toSource(x: number, y: number): [number, number]
+  fromSource(X: number, Y: number): [number, number]
+  /** Source-px bounding box of an output rectangle (its edges are sampled: lines may bend). */
+  bounds(x0: number, y0: number, x1: number, y1: number): { x0: number; y0: number; x1: number; y1: number }
+}
+
+export function lensWarp(src: Size, g: Geometry): LensWarp | null {
+  const radial = radialOf(g.lens)
+  return radial ? { cx: src.width / 2, cy: src.height / 2, norm: Math.min(src.width, src.height) / 2, radial } : null
+}
+
+/** A mapping from a homography (and optional lens warp). */
+export function mappingOf(P: Mat3, lens: LensWarp | null): Mapping {
+  const affine = !lens && P[6] === 0 && P[7] === 0 && P[8] === 1
+  const Pinv = inv3(P)
+  const toSource = (x: number, y: number): [number, number] => {
+    const [cx, cy] = affine ? applyAffine(P.slice(0, 6) as Affine, x, y) : applyHomography(P, x, y)
+    if (!lens) return [cx, cy]
+    const dx = cx - lens.cx, dy = cy - lens.cy
+    const k = distortionScale(lens.radial, Math.hypot(dx, dy) / lens.norm)
+    return [lens.cx + dx * k, lens.cy + dy * k]
+  }
+  const fromSource = (X: number, Y: number): [number, number] => {
+    let cx = X, cy = Y
+    if (lens) {
+      const dx = X - lens.cx, dy = Y - lens.cy, rd = Math.hypot(dx, dy) / lens.norm
+      const k = rd > 0 ? undistortRadius(lens.radial, rd) / rd : 1 / distortionScale(lens.radial, 0)
+      cx = lens.cx + dx * k
+      cy = lens.cy + dy * k
+    }
+    return affine ? applyAffine(invertAffine(P.slice(0, 6) as Affine), cx, cy) : applyHomography(Pinv, cx, cy)
+  }
+  const bounds = (x0: number, y0: number, x1: number, y1: number) => {
+    if (affine) return mapBounds(P.slice(0, 6) as Affine, x0, y0, x1, y1)
+    const xs: number[] = [], ys: number[] = []
+    const n = 32
+    for (let i = 0; i <= n; i++) {
+      const t = i / n
+      for (const [x, y] of [[x0 + (x1 - x0) * t, y0], [x0 + (x1 - x0) * t, y1], [x0, y0 + (y1 - y0) * t], [x1, y0 + (y1 - y0) * t]]) {
+        const [X, Y] = toSource(x, y)
+        xs.push(X)
+        ys.push(Y)
+      }
+    }
+    // Sampling can miss a bulge between samples by a fraction of a pixel: pad.
+    return { x0: Math.min(...xs) - 2, y0: Math.min(...ys) - 2, x1: Math.max(...xs) + 2, y1: Math.max(...ys) + 2 }
+  }
+  return { P, lens, affine, toSource, fromSource, bounds }
+}
+
+/** A plain affine mapping (e.g. scaled-source texture px → source px). */
+export const affineMapping = (a: Affine): Mapping => mappingOf(toMat3(a), null)
+
+/** Source px per output px around an output point (the mapping's local scale). */
+export function localScale(m: Mapping, x: number, y: number): number {
+  if (m.affine) return Math.sqrt(Math.abs(m.P[0] * m.P[4] - m.P[1] * m.P[3]))
+  const [X, Y] = m.toSource(x, y), [Xx, Yx] = m.toSource(x + 1, y), [Xy, Yy] = m.toSource(x, y + 1)
+  return Math.sqrt(Math.abs((Xx - X) * (Yy - Y) - (Xy - X) * (Yx - Y)))
+}
+
+/** Output px (in an image of size `out`) → source px, through everything (see Mapping). */
+export function outputMapping(src: Size, g: Geometry, uncropped: boolean, out: Size): Mapping {
+  const toFrame = toMat3(outputToFrame(src, g, uncropped, out))
+  const frameToSrc = toMat3(frameToSource(src, g))
+  const P = isIdentityPerspective(g.perspective)
+    ? toMat3(composeAffine(frameToSource(src, g), outputToFrame(src, g, uncropped, out)))
+    : mul3(frameToSrc, mul3(perspectiveInverse(g.perspective!, frameSize(src, g)), toFrame))
+  return mappingOf(P, lensWarp(src, g))
 }
 
 /** Normalized (0…1) position in the rendered frame → source px. */
 export function normalizedToSource(src: Size, g: Geometry, uncropped: boolean, nx: number, ny: number): [number, number] {
-  return applyAffine(outputToSource(src, g, uncropped, { width: 1, height: 1 }), nx, ny)
+  return outputMapping(src, g, uncropped, { width: 1, height: 1 }).toSource(nx, ny)
 }
 
 /**
@@ -132,6 +224,6 @@ export function viewToMask(src: Size, g: Geometry, uncropped: boolean, nx: numbe
 
 /** Mask coordinates → normalized point of the rendered view (0…1; outside that range when cropped away). */
 export function maskToView(src: Size, g: Geometry, uncropped: boolean, mx: number, my: number): { x: number; y: number } {
-  const [x, y] = applyAffine(invertAffine(outputToSource(src, g, uncropped, { width: 1, height: 1 })), mx * src.width, my * src.height)
+  const [x, y] = outputMapping(src, g, uncropped, { width: 1, height: 1 }).fromSource(mx * src.width, my * src.height)
   return { x, y }
 }

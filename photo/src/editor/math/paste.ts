@@ -8,7 +8,7 @@ import type { PhotoRecord } from '../../io/types'
 // parts (top-level recipe keys), except Light and Presence, which split
 // `basic` so either can be pasted alone.
 
-export type PasteGroup = 'look' | 'wb' | 'light' | 'presence' | 'curve' | 'mixer' | 'grading' | 'detail' | 'effects' | 'masks' | 'retouch' | 'crop'
+export type PasteGroup = 'look' | 'wb' | 'light' | 'presence' | 'curve' | 'levels' | 'mixer' | 'colorEditor' | 'grading' | 'detail' | 'effects' | 'lens' | 'transform' | 'masks' | 'retouch' | 'crop'
 
 export const PASTE_GROUPS: { id: PasteGroup; label: string }[] = [
   { id: 'look', label: 'Profile & treatment' },
@@ -16,10 +16,14 @@ export const PASTE_GROUPS: { id: PasteGroup; label: string }[] = [
   { id: 'light', label: 'Light' },
   { id: 'presence', label: 'Presence' },
   { id: 'curve', label: 'Tone curve' },
+  { id: 'levels', label: 'Levels' },
   { id: 'mixer', label: 'Color mixer' },
+  { id: 'colorEditor', label: 'Color editor' },
   { id: 'grading', label: 'Color grading' },
   { id: 'detail', label: 'Detail' },
   { id: 'effects', label: 'Effects' },
+  { id: 'lens', label: 'Lens corrections' },
+  { id: 'transform', label: 'Transform (Upright)' },
   { id: 'masks', label: 'Masks' },
   { id: 'retouch', label: 'Healing spots' },
   { id: 'crop', label: 'Crop & rotation' },
@@ -32,10 +36,14 @@ const DIRECT: Partial<Record<PasteGroup, RecipePart[]>> = {
   look: ['profile', 'treatment'],
   wb: ['wb'],
   curve: ['curve'],
+  levels: ['levels'],
   mixer: ['mixer'],
+  colorEditor: ['colorEditor'],
   grading: ['grading'],
   detail: ['detail'],
   effects: ['effects'],
+  lens: ['lens'],
+  transform: ['transform'],
   masks: ['layers'],
   retouch: ['retouch'],
   crop: ['geometry'],

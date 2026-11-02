@@ -33,9 +33,9 @@ const save = (name, b64) => b64 && writeFileSync(join(outDir, name + '.png'), Bu
 const ok = (cond, label, detail) => console.log(`${cond ? 'PASS' : 'FAIL'} ${label}`, JSON.stringify(detail))
 
 console.log('supported', await page.evaluate(() => window.lab.supported))
-const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-05.jpg', 'photo-21.jpg']
+const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-04.jpg', 'photo-05.jpg', 'photo-21.jpg']
 for (const j of jpegList) await lab('loadJpeg', j, '/jpeg/' + j)
-const needRaw = want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
+const needRaw = want('lens') || want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
 if (needRaw) {
   console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW')))
   console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF')))
@@ -162,6 +162,58 @@ if (want('ai')) {
   save('ai-overlay', await lab('canvasShot', 'photo-21.jpg', { layers: [AI_SKY] }, { maskOverlay: 'aisky' }, 768, 512))
 }
 
+// Render hashes from the Phase 3 engine (SwiftShader): recipes without Phase 4 features must stay bit-identical.
+const PHASE3_HASHES = { arw: '285b1d96/c3c0de58', jpg: 'ac5a74f/9f2535ab', local: 'de0946e4/7e22bd6b', ai: '476d76a1/65291731', jpgEdit: '4a1197fb/5d376170' }
+
+// Phase 4: lens + perspective + levels + color editor, with a mask and a heal spot.
+const LENS = { enabled: true, profileId: 'test', vignetting: { k: [-0.35, 0.12, -0.02], amount: 100 }, tca: { r: [1.0004, 0, 0], b: [0.9996, 0, 0] }, autoCA: true,
+  manualVignetting: 15, manualVignettingMidpoint: 50, defringe: { purple: 10, purpleHue: [260, 330], green: 5, greenHue: [70, 120] } }
+const GEO4 = { crop: { x: 0.06, y: 0.08, w: 0.85, h: 0.82 }, angle: 2, rotate: 0, flipH: true, flipV: false, aspect: 'free',
+  lens: { profile: { model: 'poly3', k: [-0.03], amount: 100 }, manual: 15 },
+  perspective: { vertical: -20, horizontal: 10, rotate: 1.5, aspect: 5, scale: 104, offsetX: 2, offsetY: -3, mode: 'manual', guides: [] } }
+const LEVELS = { rgb: { inBlack: 12, inWhite: 240, gamma: 1.1, outBlack: 4, outWhite: 252 }, r: { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 }, g: { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 }, b: { inBlack: 0, inWhite: 250, gamma: 1, outBlack: 0, outWhite: 255 } }
+const GREENS = { id: 'g', name: 'Greens', enabled: true, hue: 90, sat: 50, hueWidth: 30, satLow: 10, satHigh: 100, smooth: 60, hueShift: -8, satShift: -25, lightShift: 10 }
+const PHASE4 = { geometry: GEO4, lens: LENS, levels: LEVELS, colorEditor: [GREENS], layers: [LAYERS[0]], retouch: [SPOTS[0]] }
+
+if (want('lens')) {
+  await lab('setupRasters')
+  const h = await lab('hashes', [['arw', 'arw', {}], ['jpg', 'photo-21.jpg', {}], ['local', 'arw', LOCAL], ['ai', 'arw', AI], ['jpgEdit', 'photo-21.jpg', { basic: { highlights: -60, shadows: 50, clarity: 30, vibrance: 30 } }]])
+  ok(Object.entries(PHASE3_HASHES).every(([k, v]) => h[k] === v), 'recipes without Phase 4 features render bit-identical to Phase 3 (export + canvas)', h)
+  const a = await lab('canvasParity', 'arw', PHASE4)
+  ok(a.maxDiff <= 2, 'lens + perspective + levels + color editor + mask + heal: canvas (1:1) == export', a)
+  const b = await lab('regionCheck', 'arw', PHASE4, 700, 500)
+  ok(b.maxDiff <= 2 && b.meanDiff < 0.6, 'same: 100 % view == export', b)
+  const c = await lab('tiling', 'arw', PHASE4)
+  ok(c.maxDiff16 <= 320 && c.meanDiff16 < 0.5, 'same: tiled export == single tile (16-bit)', c)
+  await lab('makeGrid', 'grid-barrel', 'barrel', { profile: { model: 'poly3', k: [-0.08], amount: 100 }, manual: 0 })
+  const lb = await lab('lineTest', 'grid-barrel', { geometry: { lens: { profile: { model: 'poly3', k: [-0.08], amount: 100 }, manual: 0 } } })
+  save('grid-barrel-before', lb.pngBefore)
+  save('grid-barrel-after', lb.pngAfter)
+  // The tracker's own noise floor: the same chart without any distortion.
+  await lab('makeGrid', 'grid-plain', 'none', null)
+  const ref = (await lab('lineTest', 'grid-plain', {})).before
+  const floor = Math.max(ref.vertical.dev, ref.horizontal.dev)
+  ok(lb.after.vertical.dev <= floor + 0.3 && lb.after.horizontal.dev <= floor + 0.3 && lb.before.vertical.dev > 20 * floor,
+    'barrel-distorted grid: lines straight after correction (max deviation px, vs an undistorted chart)', { before: lb.before, after: lb.after, undistorted: ref })
+  const KEY = { vertical: -45, horizontal: 20, rotate: 0, aspect: 0, scale: 100, offsetX: 0, offsetY: 0, mode: 'manual', guides: [] }
+  await lab('makeGrid', 'grid-key', 'keystone', KEY)
+  const lk = await lab('lineTest', 'grid-key', { geometry: { perspective: KEY } })
+  save('grid-keystone-before', lk.pngBefore)
+  save('grid-keystone-after', lk.pngAfter)
+  ok(lk.after.vertical.slope < 0.002 && lk.after.horizontal.slope < 0.002 && lk.before.vertical.slope > 0.05, 'keystoned grid: perspective sliders make converging lines parallel again (max slope)', { before: lk.before, after: lk.after })
+  const ca = await lab('autoCATest', 1.0015)
+  ok(Math.abs(ca.r - 1.0015) < 0.0003 && Math.abs(ca.b - 1 / 1.0015) < 0.0003, 'auto CA finds the red / blue scale of synthetic lateral CA', ca)
+  const df = await lab('defringeTest')
+  ok(df.after < df.before * 0.4, 'defringe removes a purple fringe at a bright edge (chroma, 8-bit)', df)
+  const t = await lab('timing', 'arw', 1600, 1000)
+  console.log('timing without Phase 4 items (SwiftShader, 1600×1000)', JSON.stringify(t))
+  const R = async (file, name, patch) => save(file, (await lab('exportRender', name, patch, { maxLongEdge: 1400, png: true })).png)
+  await R('p4-arw-all', 'arw', PHASE4)
+  await R('p4-persp-21', 'photo-21.jpg', { geometry: { perspective: { vertical: -35, horizontal: 15, rotate: 0, aspect: 0, scale: 92, offsetX: 0, offsetY: 0, mode: 'manual', guides: [] } } })
+  await R('p4-levels-color-21', 'photo-21.jpg', { levels: LEVELS, colorEditor: [{ id: 's', name: 'Sky', enabled: true, hue: 215, sat: 45, hueWidth: 25, satLow: 15, satHigh: 100, smooth: 60, hueShift: 12, satShift: 35, lightShift: -15 }] })
+  await R('p4-skin-04', 'photo-04.jpg', { colorEditor: [{ id: 'k', name: 'Skin', enabled: true, hue: 22, sat: 40, hueWidth: 22, satLow: 10, satHigh: 85, smooth: 60, hueShift: 0, satShift: 0, lightShift: 0, uniformity: { hue: 70, sat: 50, light: 50 } }] })
+}
+
 if (want('previews')) console.log('look previews (SwiftShader)', JSON.stringify(await lab('previewTiming', 'arw', 12)))
 
 if (want('context')) {
@@ -182,7 +234,7 @@ if (want('renders') || want('look')) {
     save(file, r.png)
     console.log('render', file, JSON.stringify({ ...r, png: undefined }))
   }
-  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai'].includes(a))
+  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai', 'lens'].includes(a))
   const R0 = R
   R = async (file, ...rest) => (only.length === 0 || only.some((o) => file.includes(o))) && R0(file, ...rest)
   await R('arw-default', 'arw', {})

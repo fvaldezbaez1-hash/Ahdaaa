@@ -521,5 +521,133 @@ async function vsPlain(name, patch) {
   return { maxDiff: m }
 }
 
-window.lab = { vsPlain, setupRasters, denoiseCheck, removalCheck, developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
+/** FNV-1a hashes of a fixed set of renders (export + interactive canvas): proves defaults are bit-identical across versions. */
+async function hashes(patches) {
+  const fnv = (a) => { let h = 2166136261; for (let i = 0; i < a.length; i++) h = Math.imul(h ^ a[i], 16777619) >>> 0; return h.toString(16) }
+  const out = {}
+  for (const [key, name, patch] of patches) {
+    const p = photos[name]
+    const r = await engine.renderImage(recipeFor(name, patch), p.image, p.color, { bitDepth: 16, colorSpace: 'srgb', maxLongEdge: 1000, rasters })
+    engine.setSource(p.image, p.color)
+    engine.resize(900, 600)
+    engine.render(recipeFor(name, patch))
+    const gl = canvas.getContext('webgl2'), px = new Uint8Array(900 * 600 * 4)
+    gl.readPixels(0, 0, 900, 600, gl.RGBA, gl.UNSIGNED_BYTE, px)
+    out[key] = fnv(new Uint8Array(r.data.buffer)) + '/' + fnv(px)
+  }
+  return out
+}
+
+/** Synthetic test charts (display kind): a grid of dark lines seen through a known lens or perspective. */
+async function makeGrid(name, kind, param) {
+  const { radialOf, undistortRadius } = await import('/src/engine/lens.ts')
+  const { perspectiveMatrix, applyHomography } = await import('/src/edit/perspective.ts')
+  const W = 1500, H = 1000, cx = W / 2, cy = H / 2, norm = Math.min(W, H) / 2
+  const radial = kind === 'barrel' ? radialOf(param) : null
+  const Hm = kind === 'keystone' ? perspectiveMatrix(param, { width: W, height: H }) : null
+  const data = new Uint16Array(W * H * 3)
+  const line = (u) => { const d = Math.abs(((u % 100) + 100) % 100 - 50); return Math.min(1, Math.max(0, (50 - d - 1.5) / 1.2)) }
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      let ux = x + 0.5, uy = y + 0.5
+      if (radial) {
+        const dx = ux - cx, dy = uy - cy, rd = Math.hypot(dx, dy) / norm
+        const k = rd > 0 ? undistortRadius(radial, rd) / rd : 1
+        ux = cx + dx * k
+        uy = cy + dy * k
+      } else if (Hm) [ux, uy] = applyHomography(Hm, ux, uy)
+      // Dark lines every 100 px (centred on multiples of 100, 3 px wide) on a light ground.
+      const dark = 1 - line(ux - 50) * line(uy - 50)
+      const v = Math.round((0.75 - 0.7 * dark) * 65535)
+      data.set([v, v, v], (y * W + x) * 3)
+    }
+  photos[name] = { image: { width: W, height: H, data }, color: { kind: 'display', space: 'srgb-linear' } }
+}
+
+/** Straightness of the grid's vertical and horizontal lines in a render: max deviation (px) from a fitted straight line. */
+function straightness(img) {
+  // Transparent pixels (outside the photo after the correction) count as light: only real lines are dark.
+  const lum = (x, y) => { const o = (y * img.width + x) * 4; return img.data[o + 3] < 255 ? 255 : img.data[o + 1] }
+  const track = (vertical) => {
+    const len = vertical ? img.height : img.width, across = vertical ? img.width : img.height
+    const at = (a, t) => (vertical ? lum(a, t) : lum(t, a))
+    // Line centres on a scanline between grid lines: narrow dark runs.
+    const mid = Math.floor(len / 2) + 25, starts = []
+    for (let a = 2; a < across - 10; a++) if (at(a, mid) < 110 && at(a - 1, mid) >= 110 && at(a + 8, mid) >= 110) starts.push(a)
+    let worst = 0, slope = 0
+    for (const s0 of starts) {
+      let a = s0 + 1
+      const pts = []
+      for (const dir of [1, -1])
+        for (let t = mid, prev = a; t >= len * 0.12 && t < len * 0.88; t += dir * 5) {
+          let sw = 0, sa = 0
+          for (let k = Math.round(prev) - 8; k <= Math.round(prev) + 8; k++) if (k > 0 && k < across) { const w = Math.max(0, 200 - at(k, t)); sw += w; sa += w * k }
+          if (sw < 50) break
+          prev = sa / sw
+          pts.push([t, prev])
+        }
+      if (pts.length < 20) continue
+      const n = pts.length, mt = pts.reduce((s, p) => s + p[0], 0) / n, ma = pts.reduce((s, p) => s + p[1], 0) / n
+      const b = pts.reduce((s, p) => s + (p[0] - mt) * (p[1] - ma), 0) / pts.reduce((s, p) => s + (p[0] - mt) ** 2, 0)
+      for (const p of pts) worst = Math.max(worst, Math.abs(p[1] - (ma + b * (p[0] - mt))))
+      slope = Math.max(slope, Math.abs(b))
+    }
+    return { dev: Math.round(worst * 100) / 100, slope: Math.round(slope * 1e4) / 1e4 }
+  }
+  return { vertical: track(true), horizontal: track(false) }
+}
+
+/** Render a chart without and with a correction; how straight its lines come out. */
+async function lineTest(name, patch) {
+  const p = photos[name]
+  const opts = { bitDepth: 8, colorSpace: 'srgb', rasters }
+  const a = await engine.renderImage(recipeFor(name), p.image, p.color, opts)
+  const b = await engine.renderImage(recipeFor(name, patch), p.image, p.color, opts)
+  return { before: straightness(a), after: straightness(b), pngBefore: await toPng(a), pngAfter: await toPng(b) }
+}
+
+/** Auto CA on a synthetic chart whose red channel is magnified by `s` (blue by 1/s). */
+async function autoCATest(s) {
+  const { estimateCA, AUTO_CA_EDGE } = await import('/src/engine/lens.ts')
+  const { areaDownscale, lowResSize } = await import('/src/engine/image.ts')
+  await makeGrid('ca', 'none', null)
+  const g = photos.ca.image, W = g.width, H = g.height, d = new Uint16Array(g.data.length)
+  const at = (x, y) => g.data[(Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))) * 3]
+  // Bilinear, so the synthetic CA is a true sub-pixel radial scale.
+  const bil = (x, y) => {
+    const fx = x - 0.5, fy = y - 0.5, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0
+    return Math.round((at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty)
+  }
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const dx = x + 0.5 - W / 2, dy = y + 0.5 - H / 2, o = (y * W + x) * 3
+      d[o] = bil(W / 2 + dx / s, H / 2 + dy / s)
+      d[o + 1] = g.data[o + 1]
+      d[o + 2] = bil(W / 2 + dx * s, H / 2 + dy * s)
+    }
+  const img = { width: W, height: H, data: d }
+  const ls = lowResSize(W, H, AUTO_CA_EDGE)
+  return estimateCA(areaDownscale(img, ls.width, ls.height))
+}
+
+/** Defringe: a bright patch with a purple border; how much of the border's colour survives. */
+async function defringeTest() {
+  const W = 400, H = 300, d = new Uint16Array(W * H * 3)
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const inBox = x > 150 && x < 250 && y > 100 && y < 200, border = !inBox && x > 147 && x < 253 && y > 97 && y < 203
+      const c = inBox ? [0.95, 0.95, 0.95] : border ? [0.25, 0.05, 0.35] : [0.02, 0.02, 0.02]
+      d.set(c.map((v) => Math.round(v * 65535)), (y * W + x) * 3)
+    }
+  photos.fringe = { image: { width: W, height: H, data: d }, color: { kind: 'display', space: 'srgb-linear' } }
+  const chroma = async (patch) => {
+    const r = await engine.renderImage(recipeFor('fringe', patch), photos.fringe.image, photos.fringe.color, { bitDepth: 8, colorSpace: 'srgb', rasters })
+    const o = (150 * W + 148) * 4
+    return Math.max(r.data[o], r.data[o + 1], r.data[o + 2]) - Math.min(r.data[o], r.data[o + 1], r.data[o + 2])
+  }
+  const lens = (purple) => ({ lens: { enabled: false, profileId: '', vignetting: null, tca: null, autoCA: false, manualVignetting: 0, manualVignettingMidpoint: 50, defringe: { purple, purpleHue: [260, 330], green: 0, greenHue: [70, 120] } } })
+  return { before: await chroma(lens(0)), after: await chroma(lens(20)) }
+}
+
+window.lab = { makeGrid, lineTest, autoCATest, defringeTest, hashes, vsPlain, setupRasters, denoiseCheck, removalCheck, developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
 window.ready = true

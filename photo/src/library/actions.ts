@@ -81,7 +81,23 @@ export async function pasteEdits(ids: readonly string[]) {
     toast('Nothing to paste yet. Copy a photo’s edits first.')
     return
   }
-  if (await updateRecipes(ids, (p) => pasteOnto(p, clip))) toast(`Pasted edits onto ${plural(ids.length, 'photo')}`)
+  if (!(await updateRecipes(ids, (p) => pasteOnto(p, clip)))) return
+  toast(`Pasted edits onto ${plural(ids.length, 'photo')}`)
+  await resolvePastedLenses(ids)
+}
+
+/**
+ * Pasted lens corrections keep their amounts but not the source photo's profile: look up each
+ * photo's own lens (from its camera data) now, so thumbnails and exports don't wait for the editor.
+ */
+async function resolvePastedLenses(ids: readonly string[]) {
+  const { needsResolve } = await import('../editor/lens/lensState')
+  const todo = (await db.photos.bulkGet([...ids])).filter((p): p is PhotoRecord => !!p && needsResolve(p.recipe))
+  if (!todo.length) return
+  const { resolveRecipeLens } = await import('../editor/lens/lensSync')
+  const resolved = new Map<string, EditRecipe>()
+  for (const p of todo) resolved.set(p.id, await resolveRecipeLens(p, p.recipe).catch(() => p.recipe))
+  await updateRecipes([...resolved.keys()], (p) => resolved.get(p.id) ?? p.recipe)
 }
 
 export async function resetEdits(ids: readonly string[]) {

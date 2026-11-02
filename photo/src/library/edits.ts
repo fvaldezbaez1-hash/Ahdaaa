@@ -1,14 +1,20 @@
 // Copy / paste / reset of edit recipes between photos (pure).
 import { defaultRecipe, isUnedited, normalizeRecipe } from '../edit/defaults'
 import { blankRasters } from '../editor/ai/refs'
+import { blankProfile } from '../editor/lens/lensState'
 import type { EditRecipe, SourceKind } from '../edit/types'
 import type { PhotoRecord } from '../io/types'
 
-export type RecipePart = Exclude<keyof EditRecipe, 'v' | 'look'>
+/**
+ * Top-level recipe keys, plus 'transform' (geometry.perspective). 'geometry' is the crop, rotation and
+ * straighten only; lens distortion travels with 'lens' and perspective with 'transform'.
+ */
+export type RecipePart = Exclude<keyof EditRecipe, 'v' | 'look'> | 'transform'
 
-export const ALL_PARTS: readonly RecipePart[] = ['profile', 'treatment', 'wb', 'basic', 'curve', 'mixer', 'grading', 'detail', 'effects', 'geometry', 'layers', 'retouch']
-/** What Copy/Paste carries by default: everything except the crop and rotation and the healing spots, which belong to each frame. */
-export const DEFAULT_PARTS: readonly RecipePart[] = ALL_PARTS.filter((p) => p !== 'geometry' && p !== 'retouch')
+export const ALL_PARTS: readonly RecipePart[] = ['profile', 'treatment', 'wb', 'basic', 'curve', 'levels', 'mixer', 'colorEditor', 'grading', 'detail', 'effects', 'lens', 'transform', 'geometry', 'layers', 'retouch']
+/** What Copy/Paste carries by default: everything except what belongs to each frame (crop, perspective, healing). */
+export const DEFAULT_PARTS: readonly RecipePart[] = ALL_PARTS.filter((p) => p !== 'geometry' && p !== 'retouch' && p !== 'transform')
+const FRAME_PARTS: readonly string[] = ['geometry', 'retouch', 'transform']
 
 export interface Clipboard {
   recipe: unknown
@@ -37,20 +43,35 @@ export function pasteOnto(target: Target, clip: Clipboard): EditRecipe {
   const srcKind = raw.wb && typeof raw.wb.temp === 'number' ? kindOfRecipe(raw as EditRecipe) : target.kind
   const src = normalizeRecipe(raw, srcKind)
   const next: EditRecipe = { ...target.recipe }
-  const write = next as unknown as Record<RecipePart, unknown>
-  for (const part of clip.parts) {
-    if (!(ALL_PARTS as readonly string[]).includes(part)) continue
+  const write = next as unknown as Record<string, unknown>
+  for (const part of clip.parts as RecipePart[]) {
+    if (!ALL_PARTS.includes(part)) continue
     if (part === 'wb') {
       if (src.wb.preset === 'asShot') next.wb = defaultRecipe(target.kind, target.raw?.asShot).wb
       else if (srcKind === target.kind) next.wb = { ...src.wb }
       continue
     }
+    if (part === 'transform') {
+      next.geometry = { ...next.geometry, perspective: structuredClone(src.geometry.perspective) }
+      continue
+    }
+    if (part === 'geometry') {
+      next.geometry = { ...structuredClone(src.geometry), lens: next.geometry.lens, perspective: next.geometry.perspective }
+      continue
+    }
+    if (part === 'lens') {
+      // A lens profile is found per photo (its lens and focal length): keep the choices, find it again there.
+      const pasted = blankProfile({ lens: src.lens, geometry: src.geometry })
+      next.lens = structuredClone(pasted.lens)
+      next.geometry = { ...next.geometry, lens: structuredClone(pasted.geometry.lens) }
+      continue
+    }
     // AI masks and removals were computed for the photo they came from: blank them to recompute here.
-    const value = part === 'layers' || part === 'retouch' ? blankRasters({ [part]: src[part] })[part] : src[part as RecipePart]
-    write[part as RecipePart] = structuredClone(value)
+    const value = part === 'layers' || part === 'retouch' ? blankRasters({ [part]: src[part] })[part] : src[part]
+    write[part] = structuredClone(value)
   }
   // The look describes the tone settings, so it travels with them (not with a crop-only paste).
-  if (clip.parts.some((p) => p !== 'geometry' && p !== 'retouch' && (ALL_PARTS as readonly string[]).includes(p))) next.look = src.look ? { ...src.look } : undefined
+  if (clip.parts.some((p) => !FRAME_PARTS.includes(p) && (ALL_PARTS as readonly string[]).includes(p))) next.look = src.look ? { ...src.look } : undefined
   return next
 }
 

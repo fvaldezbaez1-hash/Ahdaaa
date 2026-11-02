@@ -1,16 +1,20 @@
 import { useEditor } from '../../state/editor'
+import { ColorEditor } from '../color/ColorEditor'
 import { CropActions, CropPanel } from '../crop/CropPanel'
+import { LensPanel } from '../lens/LensPanel'
 import { HealPanel } from '../masks/HealPanel'
 import { MasksPanel, MasksSummary } from '../masks/MasksPanel'
 import { ColorGrading } from '../panels/ColorGrading'
 import { ColorMixer } from '../panels/ColorMixer'
 import { Histogram } from '../panels/Histogram'
+import { Levels } from '../panels/Levels'
 import { cameraLine, exposureLine } from '../panels/photoInfo'
 import { ProfileRow } from '../panels/ProfileRow'
 import { Section } from '../panels/Section'
 import { DetailSliders, EffectsSliders, LightSliders, PresenceSliders } from '../panels/SliderGroups'
 import { ToneCurve } from '../panels/ToneCurve'
 import { WhiteBalance } from '../panels/WhiteBalance'
+import { TransformPanel } from '../transform/TransformPanel'
 import { useSession } from '../session'
 import { useView } from '../view'
 
@@ -42,6 +46,11 @@ export function Adjustments() {
         <MasksPanel layout="side" />
       ) : tool === 'heal' ? (
         <HealPanel layout="side" />
+      ) : tool === 'guides' ? (
+        <section className="ed-crop-side" aria-label="Guided Upright">
+          <h2>Transform</h2>
+          <TransformPanel />
+        </section>
       ) : cropping ? (
         <section className="ed-crop-side" aria-label="Crop and straighten">
           <div className="row between">
@@ -49,6 +58,8 @@ export function Adjustments() {
             <CropActions />
           </div>
           <CropPanel layout="side" />
+          <h2 className="ed-side-sub">Transform</h2>
+          <TransformPanel />
         </section>
       ) : (
         <>
@@ -64,14 +75,26 @@ export function Adjustments() {
           <Section id="curve" title="Tone curve" parts={['curve']}>
             <ToneCurve />
           </Section>
+          <Section id="levels" title="Levels" parts={['levels']}>
+            <Levels />
+          </Section>
           <Section id="mixer" title={bw ? 'B&W mix' : 'Color mixer'} parts={['mixer']}>
             <ColorMixer />
+          </Section>
+          <Section id="colorEditor" title="Color editor" parts={['colorEditor']}>
+            <ColorEditor />
           </Section>
           <Section id="grading" title="Color grading" parts={['grading']}>
             <ColorGrading layout="grid" />
           </Section>
           <Section id="detail" title="Detail" parts={['detail']}>
             <DetailSliders />
+          </Section>
+          <Section id="lens" title="Lens corrections" parts={['lens']}>
+            <LensPanel />
+          </Section>
+          <Section id="transform" title="Transform" parts={['transform']}>
+            <TransformPanel />
           </Section>
           <Section id="effects" title="Effects" parts={['effects']}>
             <EffectsSliders />

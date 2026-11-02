@@ -7,7 +7,7 @@ import { LIGHT_KEYS, PRESENCE_KEYS } from '../math/paste'
 // The adjustment groups shown as panel sections: how to tell they changed
 // and how to reset just them.
 
-export type PartId = 'wb' | 'light' | 'presence' | 'texture' | 'vibrance' | 'curve' | 'mixer' | 'grading' | 'detail' | 'effects'
+export type PartId = 'wb' | 'light' | 'presence' | 'texture' | 'vibrance' | 'curve' | 'levels' | 'mixer' | 'colorEditor' | 'grading' | 'detail' | 'lens' | 'transform' | 'effects'
 
 /** Structural equality for recipe pieces (plain numbers, strings, arrays, objects). */
 export function same(a: unknown, b: unknown): boolean {
@@ -31,6 +31,8 @@ export const PARTS: Record<PartId, { title: string; changed: (r: EditRecipe, d: 
   texture: { title: 'Texture', ...pickBasic(['texture', 'clarity', 'dehaze']) },
   vibrance: { title: 'Vibrance', ...pickBasic(['vibrance', 'saturation']) },
   curve: { title: 'Tone curve', changed: (r, d) => !same(r.curve, d.curve), reset: (r, d) => ({ ...r, curve: d.curve }) },
+  levels: { title: 'Levels', changed: (r, d) => !same(r.levels, d.levels), reset: (r, d) => ({ ...r, levels: d.levels }) },
+  colorEditor: { title: 'Color editor', changed: (r) => r.colorEditor.length > 0, reset: (r) => ({ ...r, colorEditor: [] }) },
   mixer: {
     title: 'Color mixer',
     changed: (r, d) => (r.treatment === 'bw' ? !same(r.mixer.bw, d.mixer.bw) : !same({ ...r.mixer, bw: 0 }, { ...d.mixer, bw: 0 })),
@@ -38,6 +40,12 @@ export const PARTS: Record<PartId, { title: string; changed: (r: EditRecipe, d: 
   },
   grading: { title: 'Color grading', changed: (r, d) => !same(r.grading, d.grading), reset: (r, d) => ({ ...r, grading: d.grading }) },
   detail: { title: 'Detail', changed: (r, d) => !same(r.detail, d.detail), reset: (r, d) => ({ ...r, detail: d.detail }) },
+  lens: {
+    title: 'Lens corrections',
+    changed: (r, d) => !same(r.lens, d.lens) || !!r.geometry.lens,
+    reset: (r, d) => ({ ...r, lens: d.lens, geometry: { ...r.geometry, lens: undefined } }),
+  },
+  transform: { title: 'Transform', changed: (r) => !!r.geometry.perspective, reset: (r) => ({ ...r, geometry: { ...r.geometry, perspective: undefined } }) },
   effects: { title: 'Effects', changed: (r, d) => !same(r.effects, d.effects), reset: (r, d) => ({ ...r, effects: d.effects }) },
 }
 

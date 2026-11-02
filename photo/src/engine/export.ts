@@ -4,12 +4,13 @@
 // limit work), through the same pipeline as the interactive view.
 
 import type { EditRecipe } from '../edit/types'
-import { frameSize, mapBounds, outputSize, outputToSource } from './geometry'
+import { frameSize, outputMapping, outputSize } from './geometry'
 import type { Gpu } from './gl'
 import { areaDownscale, atmosphericLight, boxReduce, lowResSize, resizeArea16 } from './image'
+import { AUTO_CA_EDGE, estimateCA, shadingOf } from './lens'
 import { frameParams, toWorkingSpace } from './params'
 import { retouchWindow } from './heal'
-import { aiMargin, computeGuide, Luts, marginFor, needsHaze, renderFrame, scaleSource, StageCache } from './pipeline'
+import { aiMargin, lensMargin, computeGuide, Luts, marginFor, needsHaze, renderFrame, scaleSource, StageCache } from './pipeline'
 import { RasterStore } from './rasters'
 import { applyRetouch, blendDenoised, rasterAsSource } from './retouch'
 import type { ExportRenderOptions, RenderedImage, SourceColor, SourceImage } from './types'
@@ -44,11 +45,14 @@ export async function renderTiled(gpu: Gpu, recipe: EditRecipe, source: SourceIm
   const reduced = boxReduce(source, k)
   const reducedDen = denoised ? boxReduce(denoised, k) : null
   const ratio = s * k
-  const toSource = outputToSource(full, g, false, out)
+  const map = outputMapping(full, g, false, out)
+  // Auto CA is measured on a copy of fixed size, like the interactive view, so both agree.
+  const caSize = lowResSize(full.width, full.height, AUTO_CA_EDGE)
+  const shading = recipe.lens ? shadingOf(recipe.lens, recipe.lens.autoCA ? estimateCA(areaDownscale(source, caSize.width, caSize.height)) : null) : null
   const pixelScale = s * (source.width / (source.fullWidth ?? source.width))
   const fr = frameSize(full, g)
   const frameLong = Math.max(fr.width, fr.height) * s
-  const M = marginFor(pixelScale, frameLong) + aiMargin(recipe.layers ?? [], rasters, full, s)
+  const M = marginFor(pixelScale, frameLong) + aiMargin(recipe.layers ?? [], rasters, full, s) + lensMargin(recipe.lens, pixelScale)
   // The region (tile + margins) must fit a render target, and its rotated source window a texture.
   let T = Math.min(tileLimit, gpu.caps.maxTarget - 2 * M)
   while (T > 256 && ((T + 2 * M) * 1.42 + 8) / ratio + 16 > gpu.caps.maxTexture) T = Math.floor(T / 2)
@@ -64,7 +68,7 @@ export async function renderTiled(gpu: Gpu, recipe: EditRecipe, source: SourceIm
         const inner = { x: tx * T, y: ty * T, w: Math.min(T, out.width - tx * T), h: Math.min(T, out.height - ty * T) }
         const region = { x: inner.x - M, y: inner.y - M, w: inner.w + 2 * M, h: inner.h + 2 * M }
         // The source window also holds whatever the spots inside it copy from.
-        const b = retouchWindow(items, full.width, full.height, mapBounds(toSource, region.x, region.y, region.x + region.w, region.y + region.h))
+        const b = retouchWindow(items, full.width, full.height, map.bounds(region.x, region.y, region.x + region.w, region.y + region.h))
         const pad = 2 / ratio + 3
         const ix0 = Math.min(reduced.width - 1, Math.max(0, Math.floor(b.x0 / k - pad)))
         const iy0 = Math.min(reduced.height - 1, Math.max(0, Math.floor(b.y0 / k - pad)))
@@ -95,7 +99,7 @@ export async function renderTiled(gpu: Gpu, recipe: EditRecipe, source: SourceIm
 
         const target = gpu.target(inner.w, inner.h, bits === 8 ? 'rgba8' : 'rgba32f')
         renderFrame(gpu, cache, luts, {
-          outSize: out, toSource, fullSize: full, src: scaled, region, inner, pixelScale, frameLong, output: opts.colorSpace, guide, air, rasters,
+          outSize: out, map, shading, fullSize: full, src: scaled, region, inner, pixelScale, frameLong, output: opts.colorSpace, guide, air, rasters,
         }, params, target, { dither: bits === 8, clipping: false })
         const px = gpu.read(target)
         gpu.free(target)

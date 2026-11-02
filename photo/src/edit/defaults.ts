@@ -1,5 +1,5 @@
 import { IDENTITY_CURVE } from '../color/curve'
-import { BANDS, type Band, type BandValues, type Basic, type Detail, type EditRecipe, type Effects, type Grading, type LocalAdjust, type SourceKind, type Wheel } from './types'
+import { BANDS, type Band, type BandValues, type Basic, type Detail, type EditRecipe, type Effects, type Grading, type LensCorrection, type Levels, type LocalAdjust, type SourceKind, type Wheel } from './types'
 
 export const zeroBands = (): BandValues => Object.fromEntries(BANDS.map((b) => [b, 0])) as Record<Band, number>
 const wheel = (): Wheel => ({ hue: 0, sat: 0, lum: 0 })
@@ -21,6 +21,20 @@ export const DEFAULT_EFFECTS: Effects = {
 export const defaultGrading = (): Grading => ({ shadows: wheel(), midtones: wheel(), highlights: wheel(), global: wheel(), blending: 50, balance: 0 })
 
 /** A fresh recipe. RAW photos start at the camera's as-shot white balance. */
+const LEVELS_IDENTITY = { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 }
+export const defaultLevels = (): Levels => ({ rgb: { ...LEVELS_IDENTITY }, r: { ...LEVELS_IDENTITY }, g: { ...LEVELS_IDENTITY }, b: { ...LEVELS_IDENTITY } })
+
+export const defaultLens = (): LensCorrection => ({
+  enabled: false,
+  profileId: '',
+  vignetting: null,
+  tca: null,
+  autoCA: false,
+  manualVignetting: 0,
+  manualVignettingMidpoint: 50,
+  defringe: { purple: 0, purpleHue: [270, 330], green: 0, greenHue: [70, 120] },
+})
+
 export function defaultRecipe(kind: SourceKind, asShot?: { temp: number; tint: number }): EditRecipe {
   return {
     v: 1,
@@ -29,10 +43,13 @@ export function defaultRecipe(kind: SourceKind, asShot?: { temp: number; tint: n
     wb: kind === 'raw' ? { preset: 'asShot', temp: Math.round(asShot?.temp ?? 5500), tint: Math.round(asShot?.tint ?? 0) } : { preset: 'asShot', temp: 0, tint: 0 },
     basic: { ...DEFAULT_BASIC },
     curve: { rgb: IDENTITY_CURVE.slice(), r: IDENTITY_CURVE.slice(), g: IDENTITY_CURVE.slice(), b: IDENTITY_CURVE.slice() },
+    levels: defaultLevels(),
     mixer: { hue: zeroBands(), sat: zeroBands(), lum: zeroBands(), bw: zeroBands() },
+    colorEditor: [],
     grading: defaultGrading(),
     detail: kind === 'raw' ? { ...DEFAULT_DETAIL } : { ...DEFAULT_DETAIL_DISPLAY },
     effects: { ...DEFAULT_EFFECTS },
+    lens: defaultLens(),
     geometry: { crop: { x: 0, y: 0, w: 1, h: 1 }, angle: 0, rotate: 0, flipH: false, flipV: false, aspect: 'original' },
     retouch: [],
     layers: [],
@@ -50,6 +67,8 @@ export function normalizeRecipe(r: Partial<EditRecipe> | undefined, kind: Source
     wb: { ...d.wb, ...r.wb },
     basic: { ...d.basic, ...r.basic },
     curve: { ...d.curve, ...r.curve },
+    levels: { rgb: { ...d.levels.rgb, ...r.levels?.rgb }, r: { ...d.levels.r, ...r.levels?.r }, g: { ...d.levels.g, ...r.levels?.g }, b: { ...d.levels.b, ...r.levels?.b } },
+    colorEditor: r.colorEditor ?? [],
     mixer: {
       hue: { ...d.mixer.hue, ...r.mixer?.hue },
       sat: { ...d.mixer.sat, ...r.mixer?.sat },
@@ -66,6 +85,7 @@ export function normalizeRecipe(r: Partial<EditRecipe> | undefined, kind: Source
     },
     detail: { ...d.detail, ...r.detail },
     effects: { ...d.effects, ...r.effects },
+    lens: { ...d.lens, ...r.lens, defringe: { ...d.lens.defringe, ...r.lens?.defringe } },
     geometry: { ...d.geometry, ...r.geometry, crop: { ...d.geometry.crop, ...r.geometry?.crop } },
     retouch: r.retouch ?? [],
     layers: r.layers ?? [],

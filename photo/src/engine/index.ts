@@ -8,13 +8,14 @@ import { spotsOf } from '../edit/retouch'
 import type { AiDenoise, EditRecipe, Retouch } from '../edit/types'
 import { autoSettings } from './auto'
 import { renderTiled } from './export'
-import { applyAffine, frameSize, mapBounds, normalizedToSource, outputSize, outputToSource, type Size } from './geometry'
+import { frameSize, normalizedToSource, outputMapping, outputSize, type Size } from './geometry'
 import { detectCaps, Gpu, type Target, type Texture } from './gl'
 import { findHealSource, retouchWindow } from './heal'
 import { binHistogram } from './histogram'
 import { areaDownscale, atmosphericLight, averagePixel, boxReduce, lowResSize, resizeArea16, type FloatImage } from './image'
+import { AUTO_CA_EDGE, estimateCA, shadingOf, type LensShading } from './lens'
 import { frameParams, toWorkingSpace, type FrameParams } from './params'
-import { aiMargin, computeGuide, Luts, marginFor, needsHaze, renderFrame, scaleSource, StageCache, type DevelopedSampler, type Frame, type Guide, type ScaledSource } from './pipeline'
+import { aiMargin, lensMargin, computeGuide, Luts, marginFor, needsHaze, renderFrame, scaleSource, StageCache, type DevelopedSampler, type Frame, type Guide, type ScaledSource } from './pipeline'
 import { RasterStore } from './rasters'
 import { applyRetouch, blendDenoised, rasterAsSource } from './retouch'
 import { DOWNSAMPLE, PRESENT } from './shaders'
@@ -81,6 +82,8 @@ class WebGLEngine implements Engine {
   private denoised: { key: string; int: Texture } | null = null
   private denoisedScaled: { key: string; s: ScaledSource } | null = null
   private blended: { key: string; s: ScaledSource } | null = null
+  /** Auto lateral CA measured on the source (per source). */
+  private autoCA: { version: number; ca: { r: number; b: number } } | null = null
   /** The denoised raster resized to the full source (CPU), for the 100 % view. */
   private denoisedFull: { key: string; img: SourceImage } | null = null
   private sourceVersion = 0
@@ -234,6 +237,21 @@ class WebGLEngine implements Engine {
     return this.denoisedFull.img
   }
 
+  /** Lens vignetting / lateral CA for the recipe (auto CA measured once per source). */
+  private shading(recipe: EditRecipe): LensShading | null {
+    const l = recipe.lens
+    if (!l) return null
+    let ca: { r: number; b: number } | null = null
+    if (l.autoCA && this.src) {
+      if (this.autoCA?.version !== this.sourceVersion) {
+        const ls = lowResSize(this.src.img.width, this.src.img.height, AUTO_CA_EDGE)
+        this.autoCA = { version: this.sourceVersion, ca: estimateCA(areaDownscale(this.src.img, ls.width, ls.height)) }
+      }
+      ca = this.autoCA.ca
+    }
+    return shadingOf(l, ca)
+  }
+
   setRaster(id: string, img: RasterImage | null): void {
     if (img) this.rasterImages.set(id, img)
     else this.rasterImages.delete(id)
@@ -320,11 +338,11 @@ class WebGLEngine implements Engine {
     const fs = frameSize(size, recipe.geometry)
     const pixelScale = scale * (src.img.width / (src.img.fullWidth ?? src.img.width))
     const frameLong = Math.max(fs.width, fs.height) * scale
-    const M = marginFor(pixelScale, frameLong) + aiMargin(recipe.layers ?? [], this.rasters!, size, scale)
+    const M = marginFor(pixelScale, frameLong) + aiMargin(recipe.layers ?? [], this.rasters!, size, scale) + lensMargin(recipe.lens, pixelScale)
     const plain = this.scaledSource(scale)
     const photo = this.retouch(this.denoise(plain, scale * src.k, recipe.denoise), recipe.retouch, size)
     const base: FrameBase = {
-      outSize: proc, toSource: outputToSource(size, recipe.geometry, uncropped, proc), fullSize: size, src: photo, pixelScale, frameLong,
+      outSize: proc, map: outputMapping(size, recipe.geometry, uncropped, proc), shading: this.shading(recipe), fullSize: size, src: photo, pixelScale, frameLong,
       region: { x: -M, y: -M, w: proc.width + 2 * M, h: proc.height + 2 * M }, inner: { x: 0, y: 0, w: proc.width, h: proc.height }, rasters: this.rasters!,
     }
     const rect = fit <= 1
@@ -357,14 +375,14 @@ class WebGLEngine implements Engine {
     const cw = this.canvas.width, ch = this.canvas.height
     const w = Math.min(cw, out.width), h = Math.min(ch, out.height)
     const x0 = Math.max(0, Math.min(out.width - w, Math.round(x))), y0 = Math.max(0, Math.min(out.height - h, Math.round(y)))
-    const toSource = outputToSource(size, g, uncropped, out)
+    const map = outputMapping(size, g, uncropped, out)
     const pixelScale = img.width / (img.fullWidth ?? img.width)
     const fs = frameSize(size, g)
-    const M = marginFor(pixelScale, Math.max(fs.width, fs.height)) + aiMargin(recipe.layers ?? [], this.rasters!, size, 1)
+    const M = marginFor(pixelScale, Math.max(fs.width, fs.height)) + aiMargin(recipe.layers ?? [], this.rasters!, size, 1) + lensMargin(recipe.lens, pixelScale)
     const region = { x: x0 - M, y: y0 - M, w: w + 2 * M, h: h + 2 * M }
     const items = recipe.retouch ?? []
     // The window also holds whatever the retouching inside it reads.
-    const b = retouchWindow(items, img.width, img.height, mapBounds(toSource, region.x, region.y, region.x + region.w, region.y + region.h))
+    const b = retouchWindow(items, img.width, img.height, map.bounds(region.x, region.y, region.x + region.w, region.y + region.h))
     const ix0 = Math.max(0, Math.min(img.width - 1, Math.floor(b.x0) - 3)), iy0 = Math.max(0, Math.min(img.height - 1, Math.floor(b.y0) - 3))
     const ix1 = Math.max(ix0 + 1, Math.min(img.width, Math.ceil(b.x1) + 3)), iy1 = Math.max(iy0 + 1, Math.min(img.height, Math.ceil(b.y1) + 3))
     const den = this.denoisedFor(img, recipe.denoise)
@@ -392,10 +410,10 @@ class WebGLEngine implements Engine {
       }
       this.window = { key, s: plain, r: photo }
     }
-    const base: FrameBase = { outSize: out, toSource, fullSize: size, src: this.window.r, pixelScale, frameLong: Math.max(fs.width, fs.height), region, inner: { x: x0, y: y0, w, h }, rasters: this.rasters! }
+    const base: FrameBase = { outSize: out, map, shading: this.shading(recipe), fullSize: size, src: this.window.r, pixelScale, frameLong: Math.max(fs.width, fs.height), region, inner: { x: x0, y: y0, w, h }, rasters: this.rasters! }
     const rect = [Math.floor((cw - w) / 2), Math.floor((ch - h) / 2), w, h]
     this.draw(recipe, opts, base, this.window.s, this.regionViews!, rect, (nx, ny) => {
-      const [sx, sy] = applyAffine(toSource, x0 + nx * w, y0 + ny * h)
+      const [sx, sy] = map.toSource(x0 + nx * w, y0 + ny * h)
       return { img, x: sx, y: sy }
     })
   }

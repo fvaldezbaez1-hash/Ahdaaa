@@ -20,10 +20,12 @@ export function ToolHint() {
   const removing = useView((s) => !!s.removing)
   const exclude = useView((s) => s.exclude)
   const spots = useEditor((s) => (s.recipe ? spotsOf(s.recipe.retouch).length : 0))
+  const guides = useEditor((s) => s.recipe?.geometry.perspective?.guides.length ?? 0)
   const tap = touch ? 'Tap' : 'Click'
 
   let text: string | null = null
-  if (tool === 'heal') {
+  if (tool === 'guides') text = guides >= 2 ? null : touch ? 'Drag along an edge that should be straight · 2 to 4 lines' : 'Drag along edges that should be vertical or horizontal · 2 to 4 lines'
+  else if (tool === 'heal') {
     if (removeMode) text = removing ? null : `Paint over what should go, then ${touch ? 'lift your finger' : 'let go'}`
     else text = spots ? null : `${tap} a blemish to heal it, or drag along a line`
   }
