@@ -35,7 +35,7 @@ const ok = (cond, label, detail) => console.log(`${cond ? 'PASS' : 'FAIL'} ${lab
 console.log('supported', await page.evaluate(() => window.lab.supported))
 const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-04.jpg', 'photo-05.jpg', 'photo-21.jpg']
 for (const j of jpegList) await lab('loadJpeg', j, '/jpeg/' + j)
-const needRaw = want('lens') || want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
+const needRaw = want('split') || want('lens') || want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
 if (needRaw) {
   console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW')))
   console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF')))
@@ -214,6 +214,14 @@ if (want('lens')) {
   await R('p4-skin-04', 'photo-04.jpg', { colorEditor: [{ id: 'k', name: 'Skin', enabled: true, hue: 22, sat: 40, hueWidth: 22, satLow: 10, satHigh: 85, smooth: 60, hueShift: 0, satShift: 0, lightShift: 0, uniformity: { hue: 70, sat: 50, light: 50 } }] })
 }
 
+if (want('split')) {
+  const v = await lab('beforeVisible', 'arw', 1200, 800)
+  const opaque = (h) => h.alpha === 255 && h.green > 10
+  // 'before' has no +1 EV: darker than 'after'; split shows before on the left, after on the right.
+  ok(opaque(v.before.left) && opaque(v.before.right) && opaque(v.split.left) && opaque(v.split.right) && v.split.left.green < v.split.right.green - 10,
+    "'before' and 'split' are drawn on a photo scaled down to fit", v)
+}
+
 if (want('previews')) console.log('look previews (SwiftShader)', JSON.stringify(await lab('previewTiming', 'arw', 12)))
 
 if (want('context')) {
@@ -234,7 +242,7 @@ if (want('renders') || want('look')) {
     save(file, r.png)
     console.log('render', file, JSON.stringify({ ...r, png: undefined }))
   }
-  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai', 'lens'].includes(a))
+  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai', 'lens', 'split'].includes(a))
   const R0 = R
   R = async (file, ...rest) => (only.length === 0 || only.some((o) => file.includes(o))) && R0(file, ...rest)
   await R('arw-default', 'arw', {})

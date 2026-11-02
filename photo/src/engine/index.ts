@@ -436,7 +436,9 @@ class WebGLEngine implements Engine {
         this.display[which] = t
       }
       const frame: Frame = { ...base, src: which === 'after' ? base.src : plain, output: this.output, guide: this.guideFor(params), air: toWorkingSpace(params.input, src.air) }
-      keep?.(renderFrame(gpu, views[which], this.luts!, frame, params, t, { dither: false, clipping: !!opts.showClipping, overlay: which === 'after' ? opts.maskOverlay : undefined }))
+      // Not `keep?.(renderFrame(…))`: an optional call skips evaluating its arguments, so 'before' never rendered.
+      const developed = renderFrame(gpu, views[which], this.luts!, frame, params, t, { dither: false, clipping: !!opts.showClipping, overlay: which === 'after' ? opts.maskOverlay : undefined })
+      keep?.(developed)
       return t
     }
     let developed: DevelopedSampler | null = null

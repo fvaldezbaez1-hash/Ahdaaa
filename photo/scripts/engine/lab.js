@@ -649,5 +649,26 @@ async function defringeTest() {
   return { before: await chroma(lens(0)), after: await chroma(lens(20)) }
 }
 
-window.lab = { makeGrid, lineTest, autoCATest, defringeTest, hashes, vsPlain, setupRasters, denoiseCheck, removalCheck, developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
+/** 'before' / 'split' on a photo scaled down to fit: the before half must be drawn (opaque, not black). */
+async function beforeVisible(name, cw, ch) {
+  const p = photos[name]
+  engine.setSource(p.image, p.color)
+  engine.resize(cw, ch)
+  const gl = canvas.getContext('webgl2')
+  const stats = (view) => {
+    engine.render(recipeFor(name, { basic: { exposure: 1 } }), { view, split: 0.5 })
+    const px = new Uint8Array(cw * ch * 4)
+    gl.readPixels(0, 0, cw, ch, gl.RGBA, gl.UNSIGNED_BYTE, px)
+    // Left and right quarters of the middle row band.
+    const half = (x0, x1) => {
+      let a = 0, l = 0, n = 0
+      for (let y = Math.floor(ch * 0.4); y < ch * 0.6; y++) for (let x = Math.floor(x0); x < x1; x++) { const o = (y * cw + x) * 4; a += px[o + 3]; l += px[o + 1]; n++ }
+      return { alpha: Math.round(a / n), green: Math.round(l / n) }
+    }
+    return { left: half(cw * 0.1, cw * 0.35), right: half(cw * 0.65, cw * 0.9) }
+  }
+  return { after: stats('after'), before: stats('before'), split: stats('split') }
+}
+
+window.lab = { beforeVisible, makeGrid, lineTest, autoCATest, defringeTest, hashes, vsPlain, setupRasters, denoiseCheck, removalCheck, developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
 window.ready = true
