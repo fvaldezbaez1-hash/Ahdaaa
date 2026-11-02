@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { refreshThumbnail, saveRecipe } from '../io/api'
+import { kvSet } from '../io/db'
 import { editor } from '../state/editor'
 import { toast } from '../ui/toast'
 
@@ -9,6 +10,9 @@ import { toast } from '../ui/toast'
 
 const SAVE_MS = 400
 const THUMB_MS = 1500
+
+/** Where a photo's undo steps are kept between sessions. */
+export const undoKey = (photoId: string) => `undo:${photoId}`
 
 /** JSON of the recipe last written for each photo (so reopening can tell whether it changed elsewhere). */
 export const lastSaved = new Map<string, string>()
@@ -33,6 +37,8 @@ export function usePersistence(id: string, active: boolean) {
       thumbDue = true
       try {
         await saveRecipe(id, recipe)
+        // Undo steps survive a reload (restored in session.ts when the photo opens again).
+        await kvSet(undoKey(id), editor.snapshot()).catch(() => undefined)
       } catch {
         lastSaved.delete(id)
         if (!warned) toast('Couldn’t save your edit. Check the free space on this device.', 5000)

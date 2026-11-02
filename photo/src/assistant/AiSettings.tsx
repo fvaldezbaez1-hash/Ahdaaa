@@ -51,7 +51,7 @@ export function AiSettings() {
       <div className="ai-set-row">
         <div className="grow">
           <b>Use the AI assistant</b>
-          <small>“Ask AI” in the editor and AI looks in Presets.</small>
+          <small>“Ask AI” in the editor and AI looks in Presets. It needs your own API key, below.</small>
         </div>
         <Toggle checked={ai.enabled} onChange={(enabled) => void setAi({ enabled })} label="Use the AI assistant" />
       </div>
@@ -179,7 +179,7 @@ function KeyField({ provider, saved, model, baseURL }: { provider: AiProvider; s
           </button>
         )}
         <a className="small ai-link" href={info.keyUrl} target="_blank" rel="noreferrer noopener">
-          Get a {info.vendor} key
+          Get {/^[AEIOU]/.test(info.vendor) ? 'an' : 'a'} {info.vendor} key
           <Icon name="share" size={13} />
         </a>
       </div>

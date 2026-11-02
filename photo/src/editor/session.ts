@@ -3,10 +3,10 @@ import { normalizeRecipe } from '../edit/defaults'
 import { createEngine } from '../engine'
 import type { Engine } from '../engine/types'
 import { loadWorking } from '../io/api'
-import { db, kvSet } from '../io/db'
+import { db, kvGet, kvSet } from '../io/db'
 import type { DecodedPhoto, PhotoRecord } from '../io/types'
-import { editor } from '../state/editor'
-import { lastSaved } from './persistence'
+import { editor, type UndoSnapshot } from '../state/editor'
+import { lastSaved, undoKey } from './persistence'
 import { view } from './view'
 
 // Opening a photo for editing: its record, the working-size decode, and a
@@ -70,6 +70,10 @@ export function useEditorSession(id: string): { status: SessionStatus; retry: ()
       const stored = JSON.stringify(record.recipe)
       if (s.photoId !== id || !s.recipe || lastSaved.get(id) !== stored) {
         editor.open(id, normalizeRecipe(record.recipe, record.kind, record.raw?.asShot), record.kind, record.raw?.asShot)
+        // Undo steps from an earlier session, if they still lead to this recipe.
+        void kvGet<UndoSnapshot>(undoKey(id))
+          .then((u) => u && editor.restore({ ...u, recipe: normalizeRecipe(u.recipe, record.kind, record.raw?.asShot) }))
+          .catch(() => undefined)
       }
       lastSaved.set(id, stored)
       void kvSet('lastPhoto', id).catch(() => undefined)

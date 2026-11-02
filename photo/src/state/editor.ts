@@ -25,6 +25,18 @@ export interface EditorState {
 }
 
 const MAX_UNDO = 200
+/** Undo steps kept across reloads (the in-memory limit is MAX_UNDO). */
+const KEPT_UNDO = 50
+
+/** The undo / redo steps of the open photo, as saved for the next session. */
+export interface UndoSnapshot {
+  photoId: string
+  /** The recipe the steps lead to: they're only restored onto this exact recipe. */
+  recipe: EditRecipe
+  past: EditRecipe[]
+  future: EditRecipe[]
+  history: HistoryEntry[]
+}
 
 let state: EditorState = { photoId: null, kind: 'raw', recipe: null, history: [], canUndo: false, canRedo: false, version: 0 }
 let past: EditRecipe[] = []
@@ -78,6 +90,21 @@ export const editor = {
     past = [...past, before].slice(-MAX_UNDO)
     future = []
     emit({ history: pushHistory(label), version: state.version + 1 })
+  },
+
+  /** The newest undo / redo steps of the open photo, to save for the next session. */
+  snapshot(): UndoSnapshot | null {
+    if (!state.photoId || !state.recipe) return null
+    return { photoId: state.photoId, recipe: state.recipe, past: past.slice(-KEPT_UNDO), future: future.slice(0, KEPT_UNDO), history: state.history.slice(0, KEPT_UNDO + 1) }
+  },
+
+  /** Bring back saved steps right after open(), if they lead to exactly the recipe that's open. */
+  restore(s: UndoSnapshot) {
+    if (s.photoId !== state.photoId || !state.recipe || gestureStart || past.length || future.length) return
+    if (JSON.stringify(s.recipe) !== JSON.stringify(state.recipe)) return
+    past = s.past.slice()
+    future = s.future.slice()
+    emit({ history: s.history })
   },
 
   /** A complete change (button, preset, AI) as one undo step. */

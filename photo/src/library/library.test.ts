@@ -280,6 +280,21 @@ describe('export estimate', () => {
     expect(jpeg / 1e6).toBeLessThan(16)
   })
 
+  it('prices a JPEG by its own detail, measured on its thumbnail', () => {
+    const id = { ...p, id: 'a' }
+    // A smooth gradient: its 512 px thumbnail weighs 0.039 B/px; a full-size q92 encode measured 0.031.
+    const smooth = estimateBytes([id], { format: 'jpeg', quality: 92 }, new Map([['a', 0.039]])) / 24e6
+    expect(smooth).toBeGreaterThan(0.025)
+    expect(smooth).toBeLessThan(0.05)
+    // A detailed camera file (thumbnail 0.306 B/px, full q92 measured 0.35) stays close to that.
+    const detailed = estimateBytes([id], { format: 'jpeg', quality: 92 }, new Map([['a', 0.306]])) / 24e6
+    expect(detailed).toBeGreaterThan(0.28)
+    expect(detailed).toBeLessThan(0.42)
+    // Never above the typical-photo rate, and TIFF ignores thumbnails.
+    expect(estimateBytes([id], { format: 'jpeg', quality: 92 }, new Map([['a', 9]]))).toBe(estimateBytes([id], { format: 'jpeg', quality: 92 }))
+    expect(estimateBytes([id], { format: 'tiff16', quality: 92 }, new Map([['a', 0.01]]))).toBe(24e6 * 6)
+  })
+
   it('maps long edges to size choices and names files', () => {
     expect(sizeChoiceOf(undefined)).toBe('full')
     expect(sizeChoiceOf(2048)).toBe('2048')
