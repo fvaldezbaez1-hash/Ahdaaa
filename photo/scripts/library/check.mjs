@@ -4,7 +4,7 @@
 // measures scrolling with 10,000 photos.
 //
 // Usage (from photo/): node scripts/library/check.mjs <dir with photo-01…24.jpg> [screenshot dir] [phase…]
-// Phases: desktop phone perf (default: all)
+// Phases: desktop phone perf workflow workflowPhone sync (default: all)
 import { createServer } from 'vite'
 import { createRequire } from 'node:module'
 import { mkdirSync, readFileSync } from 'node:fs'
@@ -15,7 +15,7 @@ const { chromium } = createRequire(import.meta.url)('playwright')
 const ROOT = resolve(import.meta.dirname, '../..')
 const ASSETS = resolve(process.argv[2] ?? '.')
 const OUT = resolve(process.argv[3] ?? join(tmpdir(), 'lumen-library-check'))
-const PHASES = process.argv.slice(4).length ? process.argv.slice(4) : ['desktop', 'phone', 'perf']
+const PHASES = process.argv.slice(4).length ? process.argv.slice(4) : ['desktop', 'phone', 'perf', 'workflow', 'workflowPhone', 'sync']
 const PORT = 5203
 const URL = `http://localhost:${PORT}/`
 mkdirSync(OUT, { recursive: true })
@@ -436,7 +436,7 @@ async function desktop() {
   const [download] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }).catch(() => null), page.locator('.set-card button', { hasText: 'Back up' }).click()])
   check(!!download && /lumen-edits-\d{4}-\d\d-\d\d\.json/.test(download.suggestedFilename()), 'Back up edits downloads a JSON file')
   if (download) {
-    await page.locator('.set-card input[type="file"]').setInputFiles(await download.path())
+    await page.locator('#set-storage .set-card input[type="file"]').setInputFiles(await download.path())
     check(await toastStarting(page, 'Restored edits on'), `Restore edits reads the backup (${await toastText(page)})`)
   }
   await page.evaluate(() => (document.querySelector('.settings').style.height = 'auto'))
@@ -637,10 +637,399 @@ async function perf() {
   await page.context().close()
 }
 
+// ---------- Phase 5: keywords, Compare / Survey, export presets, sync ----------
+
+const until = async (page, fn, arg, timeout = 30000) => {
+  const end = Date.now() + timeout
+  for (;;) {
+    const v = await page.evaluate(fn, arg)
+    if (v) return v
+    if (Date.now() > end) throw new Error(`timed out waiting for ${fn.toString().slice(0, 80)}`)
+    await page.waitForTimeout(100)
+  }
+}
+const photosWhere = (page, fn) => page.evaluate(async (src) => (await (await import('/src/io/db.ts')).db.photos.toArray()).filter(new Function(`return ${src}`)()), fn.toString())
+const selectTiles = async (page, from, to) => {
+  await tile(page, from).locator('.tile-media').click()
+  if (to > from) await tile(page, to).locator('.tile-media').click({ modifiers: ['Shift'] })
+}
+/** Import real files (originals for exports and previews); returns their ids. */
+const importReal = (page, names) =>
+  page.evaluate(async (names) => {
+    const { importFiles } = await import('/src/io/api.ts')
+    const files = []
+    for (const n of names) files.push(new File([await (await fetch(`/__assets/${n}`)).blob()], n, { type: 'image/jpeg' }))
+    return (await importFiles(files)).added
+  }, names)
+
+async function workflow() {
+  console.log('\n# Workflow (keywords, compare, survey, export presets) 1440×900')
+  const page = await open({ width: 1440, height: 900 })
+  await seed(page, 60)
+  await page.waitForSelector('.tile')
+
+  // Keywords on several photos from the batch bar.
+  await selectTiles(page, 1, 3)
+  const ids = await Promise.all([1, 2, 3].map((n) => tileId(page, n)))
+  await page.locator('.lib-batch button[aria-label="Keywords"]').click()
+  await page.waitForSelector('.sheet .kw-input')
+  await page.keyboard.type('Beach, Family')
+  await page.keyboard.press('Enter')
+  await until(page, async (ids) => {
+    const { db } = await import('/src/io/db.ts')
+    return (await db.photos.bulkGet(ids)).every((p) => p.keywords?.length === 2)
+  }, ids)
+  check(true, 'batch keywords: “Beach, Family” on 3 photos')
+  await shot(page, 'w-dark-keywords-sheet')
+  await closeSheet(page)
+
+  // One photo in the info panel: a partial keyword list, autocomplete.
+  await tile(page, 5).locator('.tile-media').click()
+  const info = page.locator('.lib-info .kw-input')
+  const toggle = page.locator('button[aria-label="Photo info panel"]')
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
+  await info.click()
+  await page.keyboard.type('Be')
+  await page.waitForSelector('.kw-suggest li')
+  check((await page.locator('.kw-suggest li').first().textContent()).startsWith('Beach'), 'autocomplete suggests “Beach”')
+  await shot(page, 'w-dark-keyword-suggest')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('Sunset')
+  await page.keyboard.press('Enter')
+  const five = await tileId(page, 5)
+  const p5 = await until(page, async (id) => {
+    const p = await (await import('/src/io/db.ts')).db.photos.get(id)
+    return p.keywords?.length === 2 && p
+  }, five)
+  check(p5.keywords.join() === 'Beach,Sunset', `info panel keywords: ${p5.keywords.join(', ')}`)
+  await page.locator('.lib-info .kw-chip', { hasText: 'Sunset' }).getByRole('button').click()
+  check((await until(page, async (id) => (await (await import('/src/io/db.ts')).db.photos.get(id)).keywords?.length === 1, five)), 'a chip’s × removes the keyword')
+  await page.locator('.lib-info .kw-input').blur()
+
+  // Sidebar: keywords with counts, a click filters, search finds keywords.
+  const beach = page.locator('.lib-keywords .lib-nav', { hasText: 'Beach' })
+  check((await beach.locator('.count').textContent()) === '4', 'sidebar: Beach · 4')
+  await beach.click()
+  check((await page.locator('.tile').count()) === 4 && (await page.locator('.lib-title h1').textContent()) === 'Beach', 'clicking a keyword shows its 4 photos')
+  await shot(page, 'w-dark-keyword-view')
+  await page.locator('.lib-nav', { hasText: 'All photos' }).click()
+  await page.locator('.lib-side input[type="search"]').fill('family')
+  await page.waitForTimeout(300)
+  check((await page.locator('.tile').count()) === 3, 'search “family” finds the 3 photos with that keyword')
+  await page.locator('.lib-side input[type="search"]').fill('')
+  await page.waitForTimeout(200)
+  // Rename a keyword everywhere.
+  await page.locator('.lib-keywords button[aria-label="Options for keyword Family"]').click()
+  await page.locator('.sheet button', { hasText: 'Rename…' }).click()
+  await page.locator('.sheet input').fill('Família')
+  await page.locator('.sheet .btn.primary').click()
+  await page.waitForTimeout(400)
+  check((await photosWhere(page, (p) => p.keywords?.includes('Família'))).length === 3, 'rename a keyword on every photo')
+
+  // Compare: four photos, candidate steps, rating, zoom moves both.
+  await page.locator('.lib-scroll').click({ position: { x: 5, y: 5 } }).catch(() => {})
+  await selectTiles(page, 1, 4)
+  await page.keyboard.press('c')
+  await page.waitForSelector('.loupe.compare')
+  check((await page.locator('.cmp-pane').count()) === 2, 'C opens Compare with two panes')
+  const cand0 = await page.locator('.cmp-pane').nth(1).getAttribute('aria-label')
+  await page.keyboard.press('ArrowRight')
+  const cand1 = await page.locator('.cmp-pane').nth(1).getAttribute('aria-label')
+  check(cand0 !== cand1, `→ changes the candidate (${cand1.split(':')[1]})`)
+  await page.keyboard.press('5')
+  const candName = cand1.split(': ')[1]
+  check((await until(page, async (n) => (await (await import('/src/io/db.ts')).db.photos.where('fileName').equals(n).first())?.rating === 5, candName)), '5 rates the candidate')
+  const pane = await page.locator('.cmp-view').first().boundingBox()
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2)
+  await page.mouse.wheel(0, -400)
+  await page.waitForTimeout(200)
+  const widths = await page.locator('.cmp-img').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width))
+  check(widths[0] > pane.width && Math.abs(widths[0] - widths[1]) < 2, `zoom is shared (${widths.map(Math.round).join(' / ')} px)`)
+  await shot(page, 'w-dark-compare-zoomed')
+  await page.locator('.cmp-view').first().dblclick()
+  await page.keyboard.press('ArrowUp')
+  check((await page.locator('.cmp-pane').first().getAttribute('aria-label')) === cand1.replace('Candidate', 'Select'), '↑ makes the candidate the select')
+  await shot(page, 'w-dark-compare')
+  await setTheme(page, 'light')
+  await shot(page, 'w-light-compare')
+  await setTheme(page, 'dark')
+  await page.keyboard.press('Escape')
+  check(!(await page.locator('.loupe').isVisible()), 'Esc closes Compare')
+
+  // Survey: take one out, flag in place.
+  await page.keyboard.press('n')
+  await page.waitForSelector('.loupe.survey')
+  check((await page.locator('.survey-cell').count()) === 4, 'N surveys the 4 selected photos')
+  await shot(page, 'w-dark-survey')
+  await page.locator('.survey-cell').nth(1).locator('button[aria-label^="Take"]').click()
+  check((await page.locator('.survey-cell').count()) === 3, '× takes a photo out of the survey')
+  await page.locator('.survey-cell').first().click({ position: { x: 20, y: 20 } })
+  const first = (await page.locator('.survey-cell img').first().getAttribute('alt')) ?? ''
+  await page.keyboard.press('p')
+  check((await until(page, async (n) => (await (await import('/src/io/db.ts')).db.photos.where('fileName').equals(n).first())?.flag === 1, first)), 'P picks the active photo in the survey')
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('Delete')
+  check((await page.locator('.survey-cell').count()) === 2, 'Delete takes the active photo out (not out of the library)')
+  check((await dbCount(page)) === 60, 'the library still has every photo')
+  await setTheme(page, 'light')
+  await shot(page, 'w-light-survey')
+  await setTheme(page, 'dark')
+  await page.keyboard.press('Escape')
+
+  // Export presets: real photos, a built-in preset, saving with a name clash, several presets at once.
+  const real = await importReal(page, ['photo-04.jpg', 'photo-21.jpg'])
+  await page.evaluate(async (ids) => {
+    const { addKeywordsTo } = await import('/src/library/actions.ts')
+    await addKeywordsTo(ids, ['Lighthouse', 'Maine'])
+  }, real)
+  await page.locator('.lib-keywords .lib-nav', { hasText: 'Lighthouse' }).click()
+  await page.waitForFunction(() => document.querySelectorAll('.tile').length === 2)
+  await selectTiles(page, 1, 2)
+  await page.locator('.lib-batch button[aria-label="Export"]').click()
+  await page.waitForSelector('.sheet .exp-presets')
+  await page.locator('.exp-presets select').selectOption({ label: 'Web JPEG' })
+  check((await page.locator('.sheet select').nth(1).inputValue()) === '2048', 'choosing “Web JPEG” sets 2048 px')
+  check((await page.locator('#exp-name-example').textContent()).includes('-web.jpg'), `file name example: ${await page.locator('#exp-name-example').textContent()}`)
+  await page.locator('.exp-name input').fill('{date} {name} {seq}')
+  await page.locator('.exp-name input').blur()
+  check(/\d{4}-\d\d-\d\d photo-\d\d 001\.jpg/.test(await page.locator('#exp-name-example').textContent()), `template example: ${await page.locator('#exp-name-example').textContent()}`)
+  await shot(page, 'w-dark-export-presets')
+  const savePreset = async (name) => {
+    await page.locator('.exp-presets button', { hasText: 'Save preset' }).click()
+    await page.locator('.exp-presets input').fill(name)
+  }
+  await savePreset('Proofs')
+  await page.locator('.exp-presets button', { hasText: 'Save preset' }).click()
+  await page.waitForTimeout(300)
+  await savePreset('proofs')
+  check(await page.locator('.exp-presets', { hasText: 'You already have “Proofs”' }).isVisible(), 'a name clash offers Replace or Keep both')
+  await shot(page, 'w-dark-export-clash')
+  await page.locator('.exp-presets button', { hasText: 'Keep both' }).click()
+  await page.waitForTimeout(300)
+  const names = await page.evaluate(async () => (await (await import('/src/state/settings.ts')).loadSettings()).exportPresets.map((p) => p.name))
+  check(names.join() === 'Proofs,proofs 2', `saved presets: ${names.join(', ')}`)
+  await page.locator('.exp-presets button', { hasText: 'Several presets' }).click()
+  await page.locator('.exp-several label', { hasText: 'Proofs' }).first().locator('input').uncheck().catch(() => {})
+  for (const n of ['Web JPEG', 'Full TIFF 16-bit']) await page.locator('.exp-several label', { hasText: n }).locator('input').check()
+  await page.locator('.exp-several label', { hasText: /^Proofs/ }).locator('input').uncheck().catch(() => {})
+  await shot(page, 'w-dark-export-several')
+  await page.evaluate(async () => {
+    const { setExportSink } = await import('/src/io/api.ts')
+    window.__exported = []
+    setExportSink({
+      write: async (f) => {
+        const bytes = new Uint8Array(await f.blob.arrayBuffer())
+        const text = new TextDecoder('latin1').decode(bytes.subarray(0, 200000))
+        window.__exported.push({ name: f.name, size: f.blob.size, xmp: text.includes('http://ns.adobe.com/xap/1.0/') || text.includes('<rdf:li>'), lighthouse: text.includes('Lighthouse') })
+      },
+      finish: async () => {},
+    })
+  })
+  const label = await page.locator('.sheet .lib-foot .btn.primary').textContent()
+  check(/× 2 presets/.test(label), `export button: ${label}`)
+  await page.locator('.sheet .lib-foot .btn.primary').click()
+  const exported = await until(page, () => window.__exported?.length >= 4 && window.__exported, undefined, 240000).catch(() => [])
+  console.log('       exported:', exported.map((e) => `${e.name} ${Math.round(e.size / 1024)} KB${e.xmp ? ' xmp' : ''}`).join(', '))
+  check(exported.length === 4 && exported.filter((e) => e.name.endsWith('-web.jpg')).length === 2 && exported.filter((e) => e.name.endsWith('-full.tif')).length === 2, 'two presets → a web JPEG and a full TIFF per photo')
+  check(exported.every((e) => e.xmp && e.lighthouse), 'keywords are in every exported file (XMP)')
+  await page.evaluate(async () => (await import('/src/io/api.ts')).setExportSink(null))
+
+  // Settings: the presets list.
+  await page.goto(`${URL}#/settings`)
+  await page.waitForSelector('.set-presets')
+  await page.locator('#set-export').scrollIntoViewIfNeeded()
+  await shot(page, 'w-dark-settings-presets')
+  await page.locator('#set-sync').scrollIntoViewIfNeeded()
+  await shot(page, 'w-dark-settings-sync')
+  await setTheme(page, 'light')
+  await shot(page, 'w-light-settings-sync')
+  await setTheme(page, 'dark')
+  check(page.errors.length === 0, `no page errors (${page.errors.slice(0, 3).join(' | ')})`)
+  await page.context().close()
+}
+
+async function workflowPhone() {
+  console.log('\n# Workflow on a phone 390×844')
+  const page = await open({ width: 390, height: 844 }, true)
+  await seed(page, 40)
+  await page.waitForSelector('.ptile')
+  const longPress = async (n) => {
+    const b = await page.locator(`.vgrid-item[aria-posinset="${n}"]`).boundingBox()
+    await page.mouse.move(b.x + 30, b.y + 30)
+    await page.mouse.down()
+    await page.waitForTimeout(650)
+    await page.mouse.up()
+  }
+  await longPress(1)
+  for (const n of [2, 3]) await page.locator(`.vgrid-item[aria-posinset="${n}"] .ptile`).click()
+  await page.locator('.plib-batch button', { hasText: 'More' }).click()
+  await shot(page, 'wp-dark-more')
+  await page.locator('.sheet button', { hasText: 'Keywords…' }).click()
+  await page.waitForSelector('.sheet .kw-input')
+  await page.keyboard.type('Hike, Alps')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(300)
+  await shot(page, 'wp-dark-keywords')
+  await closeSheet(page)
+  check((await photosWhere(page, (p) => p.keywords?.includes('Alps'))).length === 3, 'phone: keywords on 3 photos')
+  check(await page.locator('.plib-head .chip', { hasText: 'Alps' }).isVisible(), 'phone: keyword chips filter the grid')
+
+  await page.locator('.plib-batch button', { hasText: 'More' }).click()
+  await page.locator('.sheet button', { hasText: 'Compare' }).click()
+  await page.waitForSelector('.loupe.compare.phone')
+  const before = await page.locator('.cmp-pane').nth(1).getAttribute('aria-label')
+  const v = await page.locator('.cmp-pane').nth(1).locator('.cmp-view').boundingBox()
+  await page.mouse.move(v.x + v.width * 0.8, v.y + v.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(v.x + v.width * 0.5, v.y + v.height / 2, { steps: 5 })
+  await page.mouse.move(v.x + v.width * 0.2, v.y + v.height / 2, { steps: 5 })
+  await page.mouse.up()
+  check((await page.locator('.cmp-pane').nth(1).getAttribute('aria-label')) !== before, 'phone: swiping the candidate shows the next one')
+  await shot(page, 'wp-dark-compare')
+  await page.locator('.loupe-bar .btn.primary').click()
+  await page.locator('.plib-batch button', { hasText: 'More' }).click()
+  await page.locator('.sheet button', { hasText: 'Survey' }).click()
+  await page.waitForSelector('.loupe.survey.phone')
+  check((await page.locator('.survey-cell').count()) === 3, 'phone: survey shows the 3 photos')
+  await page.locator('.survey-cell').first().locator('button[aria-label^="Reject"]').click()
+  check((await photosWhere(page, (p) => p.flag === -1 && p.keywords?.includes('Alps'))).length >= 1, 'phone: reject in place')
+  await shot(page, 'wp-dark-survey')
+  await setTheme(page, 'light')
+  await shot(page, 'wp-light-survey')
+  await page.locator('.loupe-bar .btn.primary').click()
+
+  await page.goto(`${URL}#/settings`)
+  await page.waitForSelector('.settings-main')
+  await page.locator('#set-sync').scrollIntoViewIfNeeded()
+  await shot(page, 'wp-light-settings-sync')
+  await setTheme(page, 'dark')
+  await shot(page, 'wp-dark-settings-sync')
+  check(page.errors.length === 0, `no page errors (${page.errors.slice(0, 3).join(' | ')})`)
+  await page.context().close()
+}
+
+/**
+ * Sync between two browser profiles (two "devices"): the sync file through the UI,
+ * and the folder code against a real FileSystemDirectoryHandle (the origin-private
+ * file system), copying the folder's files across as a cloud drive would.
+ */
+async function syncPhase() {
+  console.log('\n# Sync between two devices')
+  const a = await open({ width: 1440, height: 900 })
+  const b = await open({ width: 1440, height: 900 })
+  // The same three files on both devices (separate imports: different ids).
+  const [aIds, bIds] = [await importReal(a, ['photo-04.jpg', 'photo-05.jpg', 'photo-06.jpg']), await importReal(b, ['photo-04.jpg', 'photo-05.jpg', 'photo-06.jpg'])]
+  check(aIds.length === 3 && bIds.length === 3, 'both devices imported the same photos')
+  await a.evaluate(async (ids) => {
+    const { setRating, addKeywordsTo, createAlbum } = await import('/src/library/actions.ts')
+    const { db } = await import('/src/io/db.ts')
+    const { defaultRecipe } = await import('/src/edit/defaults.ts')
+    await setRating([ids[0]], 5)
+    await addKeywordsTo([ids[0], ids[1]], ['Synced'])
+    await createAlbum('From A', [ids[2]])
+    const p = await db.photos.get(ids[1])
+    await db.photos.update(ids[1], { recipe: { ...p.recipe, basic: { ...defaultRecipe(p.kind).basic, exposure: 0.8 } }, edited: true, editedAt: Date.now() })
+  }, aIds)
+
+  // Sync file through the UI: export on A (captured), import on B.
+  await a.goto(`${URL}#/settings`)
+  await a.waitForSelector('#set-sync')
+  const download = a.waitForEvent('download')
+  await a.locator('#set-sync button', { hasText: 'Export sync file' }).click()
+  const file = await (await download).path()
+  await b.goto(`${URL}#/settings`)
+  await b.waitForSelector('#set-sync')
+  await b.locator('#set-sync input[type="file"]').setInputFiles(file)
+  check(await toastStarting(b, 'Merged:', 20000), `B merged A's sync file: ${await toastText(b)}`)
+  const onB = await b.evaluate(async () => (await (await import('/src/io/db.ts')).db.photos.toArray()).map((p) => ({ f: p.fileName, r: p.rating, k: p.keywords ?? [], e: p.recipe.basic.exposure, a: p.albumIds.length })))
+  const by = Object.fromEntries(onB.map((p) => [p.f, p]))
+  check(by['photo-04.jpg'].r === 5 && by['photo-05.jpg'].e === 0.8 && by['photo-05.jpg'].k.includes('Synced') && by['photo-06.jpg'].a === 1, 'B has A’s rating, edit, keywords and album')
+  await shot(b, 'sy-dark-after-import')
+
+  // Folder sync: each device's own OPFS folder, files copied across in between.
+  const syncOpfs = (page) =>
+    page.evaluate(async () => {
+      const { syncFolder } = await import('/src/sync/sync.ts')
+      const { handleFolder } = await import('/src/sync/folder.ts')
+      const root = await navigator.storage.getDirectory()
+      const dir = await root.getDirectoryHandle('sync', { create: true })
+      const r = await syncFolder(handleFolder(dir), { includeOriginals: true })
+      return { ...r.result, devices: r.devices }
+    })
+  const dump = (page) =>
+    page.evaluate(async () => {
+      const out = {}
+      const walk = async (d, prefix) => {
+        for await (const [name, h] of d.entries()) {
+          if (h.kind === 'directory') await walk(h, `${prefix}${name}/`)
+          else {
+            const bytes = new Uint8Array(await (await h.getFile()).arrayBuffer())
+            let s = ''
+            for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+            out[`${prefix}${name}`] = btoa(s)
+          }
+        }
+      }
+      const root = await navigator.storage.getDirectory()
+      await walk(await root.getDirectoryHandle('sync', { create: true }), '')
+      return out
+    })
+  const load = (page, files) =>
+    page.evaluate(async (files) => {
+      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('sync', { create: true })
+      for (const [path, b64] of Object.entries(files)) {
+        const parts = path.split('/')
+        let d = root
+        for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true })
+        const w = await (await d.getFileHandle(parts.at(-1), { create: true })).createWritable()
+        await w.write(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)))
+        await w.close()
+      }
+    }, files)
+  // B changes something, A deletes a photo; both sync through "the cloud".
+  await b.evaluate(async () => {
+    const { db } = await import('/src/io/db.ts')
+    const { setFlag } = await import('/src/library/actions.ts')
+    const p = await db.photos.where('fileName').equals('photo-04.jpg').first()
+    await setFlag([p.id], 1)
+  })
+  await a.evaluate(async (id) => (await import('/src/library/actions.ts')).removePhotos([id]), aIds[2])
+  let r = await syncOpfs(a)
+  check(r.devices === 0, 'A writes its catalog (no other devices yet)')
+  await load(b, await dump(a))
+  r = await syncOpfs(b)
+  check(r.devices === 1 && r.deleted === 1, `B merges A’s folder catalog: ${JSON.stringify(r)}`)
+  await load(a, await dump(b))
+  r = await syncOpfs(a)
+  const flag = await a.evaluate(async () => (await (await import('/src/io/db.ts')).db.photos.where('fileName').equals('photo-04.jpg').first()).flag)
+  check(r.devices === 1 && flag === 1, `A gets B’s pick (${JSON.stringify(r)})`)
+  r = await syncOpfs(a)
+  check(r.updated === 0 && r.created === 0 && r.deleted === 0, 'syncing again changes nothing')
+  const files = Object.keys(await dump(a))
+  check(files.some((f) => f.startsWith('devices/')) && files.some((f) => f.startsWith('originals/')), `folder layout: ${files.map((f) => f.split('/')[0]).filter((x, i, l) => l.indexOf(x) === i).join(', ')}`)
+  // A third device, empty: gets the photos from the synced originals.
+  const c = await open({ width: 1440, height: 900 })
+  await load(c, await dump(a))
+  r = await syncOpfs(c)
+  const cPhotos = await c.evaluate(async () => (await (await import('/src/io/db.ts')).db.photos.toArray()).map((p) => p.fileName).sort())
+  check(r.created === 2 && cPhotos.join() === 'photo-04.jpg,photo-05.jpg', `an empty device gets the 2 remaining photos from the folder (${cPhotos.join(', ')})`)
+  await c.goto(URL)
+  await c.waitForSelector('.tile')
+  check(await until(c, async () => (await (await import('/src/io/db.ts')).db.thumbs.count()) === 2, undefined, 60000).catch(() => false), 'their thumbnails are made on the new device')
+  await c.waitForTimeout(500)
+  await shot(c, 'sy-dark-new-device')
+  for (const p of [a, b, c]) check(p.errors.length === 0, `no page errors (${p.errors.slice(0, 3).join(' | ')})`)
+  for (const p of [a, b, c]) await p.context().close()
+}
+
 try {
   if (PHASES.includes('desktop')) await desktop()
   if (PHASES.includes('phone')) await phone()
   if (PHASES.includes('perf')) await perf()
+  if (PHASES.includes('workflow')) await workflow()
+  if (PHASES.includes('workflowPhone')) await workflowPhone()
+  if (PHASES.includes('sync')) await syncPhase()
 } catch (e) {
   failures.push(`crashed: ${e.message.split('\n')[0]}`)
   console.error(e)

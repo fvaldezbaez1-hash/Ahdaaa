@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { UpscaleField } from '../editor/ai/UpscaleField'
-import type { ExportOptions } from '../io/types'
+import type { ExportOptions, PhotoRecord } from '../io/types'
 import { Field, Segmented, Toggle } from '../ui/controls'
 import { Slider } from '../ui/Slider'
 import { FORMATS, SIZE_CHOICES, sizeChoiceOf, type SizeChoice } from './exportMath'
+import { DEFAULT_TEMPLATE, renderFileName, TOKENS, unknownTokens } from './fileNames'
 import { formatDimensions } from './library'
 
 const COLOR_SPACES: { value: ExportOptions['colorSpace']; label: string }[] = [
@@ -17,6 +18,8 @@ export function ExportFields({
   onChange,
   onCommit = onChange,
   fullSize,
+  sample,
+  count = 1,
 }: {
   value: ExportOptions
   /** Every change, including each step of a quality drag. */
@@ -25,6 +28,10 @@ export function ExportFields({
   onCommit?: (v: ExportOptions) => void
   /** Pixel size at full resolution, when exporting a single photo. */
   fullSize?: { width: number; height: number }
+  /** A photo to show the file name with (the first one exported). */
+  sample?: PhotoRecord
+  /** Photos in the export, for {seq}. */
+  count?: number
 }) {
   const [custom, setCustom] = useState(() => sizeChoiceOf(value.longEdge) === 'custom')
   const choice: SizeChoice = custom ? 'custom' : sizeChoiceOf(value.longEdge)
@@ -108,6 +115,68 @@ export function ExportFields({
           <Toggle label="Remove location" checked={value.stripLocation} onChange={(stripLocation) => set({ stripLocation })} />
         </div>
       )}
+      <div className="setting-row">
+        <span className="lbl">
+          <b>Include keywords</b>
+          <small>Searchable in Lightroom, Photos, Windows and stock sites</small>
+        </span>
+        <Toggle label="Include keywords" checked={value.includeKeywords !== false} onChange={(includeKeywords) => set({ includeKeywords })} />
+      </div>
+      <FileNameField value={value.fileName ?? DEFAULT_TEMPLATE} onChange={(fileName) => set({ fileName })} sample={sample} count={count} ext={FORMATS.find((f) => f.value === value.format)?.ext ?? 'jpg'} />
+    </div>
+  )
+}
+
+/** File name template with tokens to insert and a live example. */
+function FileNameField({ value, onChange, sample, count, ext }: { value: string; onChange: (v: string) => void; sample?: PhotoRecord; count: number; ext: string }) {
+  const input = useRef<HTMLInputElement>(null)
+  const [text, setText] = useState(value)
+  const [editing, setEditing] = useState(false)
+  const shown = editing ? text : value
+  const insert = (token: string) => {
+    const el = input.current
+    const at = el?.selectionStart ?? shown.length, end = el?.selectionEnd ?? at
+    const next = shown.slice(0, at) + token + shown.slice(end)
+    setText(next)
+    onChange(next)
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(at + token.length, at + token.length)
+    })
+  }
+  const unknown = unknownTokens(shown)
+  const example = sample ? `${renderFileName(shown, sample, { seq: 1, total: count })}.${ext}` : null
+  return (
+    <div className="field exp-name">
+      <span>File name</span>
+      <input
+        ref={input}
+        type="text"
+        value={shown}
+        spellCheck={false}
+        aria-describedby="exp-name-example"
+        onFocus={() => {
+          setText(value)
+          setEditing(true)
+        }}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          setEditing(false)
+          if (text !== value) onChange(text.trim() || DEFAULT_TEMPLATE)
+        }}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+      />
+      <div className="exp-tokens" role="group" aria-label="Insert into the file name">
+        {TOKENS.map((t) => (
+          <button key={t.token} type="button" className="chip sm" onPointerDown={(e) => e.preventDefault()} onClick={() => insert(t.token)} title={`Insert ${t.token}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <small id="exp-name-example" className="muted small">
+        {unknown.length ? `Not a token: ${unknown.join(', ')} (kept as typed). ` : ''}
+        {example ? `For example: ${example}` : 'Type your own text around the tokens.'}
+      </small>
     </div>
   )
 }

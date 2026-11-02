@@ -1943,3 +1943,57 @@ body:has(.ed-is-phone) .toast {
 .ed-phone .ed-lv-hist {
   height: 64px;
 }
+
+/* ── Phase 5: keywords under the photo info, side-by-side compare ───── */
+.ed-keywords {
+  margin-top: 8px;
+  color: var(--text);
+}
+.ed-before-clip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ed-stage[data-side='v'] .ed-before-clip {
+  width: 100%;
+  height: 50%;
+}
+.ed-before-pane {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  box-shadow: var(--shadow);
+  will-change: transform;
+}
+.ed-side-label.after {
+  left: calc(50% + 12px);
+}
+.ed-stage[data-side='v'] .ed-side-label.after {
+  left: 12px;
+  top: calc(50% + 12px);
+}
+.ed-side-divider {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-2);
+  pointer-events: none;
+}
+.ed-stage[data-side='v'] .ed-side-divider {
+  left: 0;
+  right: 0;
+  top: 50%;
+  bottom: auto;
+  width: auto;
+  height: 1px;
+}
+.ed-stage.side .ed-badge.ed-badge-ai {
+  top: 12px;
+}

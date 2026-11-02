@@ -4,6 +4,7 @@ import { Icon } from '../ui/Icon'
 import { PhotoThumb } from '../ui/PhotoThumb'
 import { Stars } from '../ui/controls'
 import { setFlag, setRating } from './actions'
+import { KeywordEditor } from './KeywordEditor'
 import { extOf, formatBytes, formatCamera, formatDimensions, formatExposure, formatMegapixels, formatTaken, plural } from './library'
 
 /** Details of the focused photo (desktop right panel). */
@@ -62,6 +63,10 @@ export function InfoPanel({ photo, selectedCount, albums }: { photo?: PhotoRecor
         <Icon name="edit" size={17} />
         Edit photo
       </a>
+      <div className="lib-info-kw">
+        <div className="lib-heading">Keywords</div>
+        <KeywordEditor key={photo.id} ids={[photo.id]} />
+      </div>
       <dl>
         {camera && (
           <>

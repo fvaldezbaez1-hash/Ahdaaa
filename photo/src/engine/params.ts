@@ -37,6 +37,14 @@ const PROFILES: Record<ProfileId, ProfileLook> = {
 /** RAW's camera-like default: a touch of color on top of the filmic curve. */
 const RAW_VIBRANCE = 0.1
 
+/**
+ * RAW baseline exposure (stops), like a DNG BaselineExposure: cameras expose RAW well below
+ * middle gray to keep highlight headroom, and their JPEG engines brighten it back. Measured on
+ * linear data against the cameras' own JPEGs (scripts/engine/check.mjs camera): +1 EV puts a
+ * daylight Sony ARW ~0.3 EV under its JPEG and a Nikon night NEF ~0.6 EV over.
+ */
+export const RAW_BASELINE_EV = 1
+
 export const REC2020_LUMA: Vec3 = [0.2627002, 0.6779981, 0.0593017]
 
 export interface InputTransform {
@@ -236,7 +244,7 @@ export function frameParams(r: EditRecipe, color: SourceColor): FrameParams {
   return {
     kind,
     input,
-    exposure: b.exposure,
+    exposure: b.exposure + (kind === 'raw' ? RAW_BASELINE_EV : 0),
     highlights: clamp1(b.highlights / 100),
     shadows: clamp1(b.shadows / 100),
     clarity: clamp1(b.clarity / 100),

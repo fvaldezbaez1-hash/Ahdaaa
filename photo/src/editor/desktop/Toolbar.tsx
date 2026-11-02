@@ -1,4 +1,3 @@
-import type { ViewMode } from '../../engine/types'
 import { goBack } from '../../router'
 import { editor, useEditor } from '../../state/editor'
 import { Segmented } from '../../ui/controls'
@@ -11,11 +10,12 @@ import { applyAuto } from '../panels/actions'
 import type { StripItem } from '../photos'
 import { useSession } from '../session'
 import { stageControl } from '../stage/stageView'
-import { useLeftPanel, useView, view } from '../view'
+import { useLeftPanel, useView, view, type CompareMode } from '../view'
 
-const MODES: { value: ViewMode; label: string; title: string }[] = [
+const MODES: { value: CompareMode; label: string; title: string }[] = [
   { value: 'after', label: 'After', title: 'Your edit' },
   { value: 'split', label: 'Split', title: 'Before | after (Y)' },
+  { value: 'side', label: 'Side by side', title: 'Before and after next to each other, zoomed together (⇧Y)' },
   { value: 'before', label: 'Before', title: 'The original (\\)' },
 ]
 

@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db, kvGet, kvSet } from '../io/db'
 import type { ExportOptions } from '../io/types'
+import type { ExportPreset } from '../library/exportPresets'
 
 export type AiProvider = 'openai' | 'google' | 'anthropic'
 
@@ -15,6 +16,8 @@ export interface Settings {
     models: Partial<Record<AiProvider, string>>
   }
   export: ExportOptions
+  /** Phase 5: the user's named export settings (built-in ones aren't stored). */
+  exportPresets?: ExportPreset[]
   favoritePresets: string[]
   /** Copied settings for "paste edits". */
   clipboard?: { recipe: unknown; parts: string[]; at: number }

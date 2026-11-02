@@ -3,7 +3,8 @@
 // ~11% for 10× the time — with optional Deflate + horizontal predictor.
 import { createDeflater, concat } from './deflate'
 import { exifParts, type ExifInput } from './exif'
-import { ascii, long, rational, serializeTiff, short, tiffSize, UNDEFINED, type Ifd, type Tag } from './tiffIfd'
+import { ascii, BYTE, long, rational, serializeTiff, short, tiffSize, UNDEFINED, type Ifd, type Tag } from './tiffIfd'
+import { iptcKeywords, xmpPacket } from './xmp'
 
 const LITTLE_ENDIAN_HOST = new Uint8Array(Uint16Array.of(1).buffer)[0] === 1
 
@@ -12,6 +13,8 @@ export interface TiffOptions {
   icc?: Uint8Array
   /** Deflate + predictor 2 (default false). */
   compress?: boolean
+  /** Phase 5: keywords as XMP (tag 700) and IPTC (tag 33723). */
+  keywords?: readonly string[]
 }
 
 /** Encode RGBA16 pixels (alpha dropped) as a 16-bit RGB TIFF. */
@@ -66,6 +69,9 @@ export async function encodeTiff16(rgba: Uint16Array, width: number, height: num
       short(296, 2),
       ...(compress ? [short(317, 2)] : []),
       ...(opts.icc ? [{ tag: 34675, type: UNDEFINED, value: opts.icc } satisfies Tag] : []),
+      ...(opts.keywords?.length
+        ? [{ tag: 700, type: BYTE, value: xmpPacket(opts.keywords) } satisfies Tag, { tag: 33723, type: UNDEFINED, value: iptcKeywords(opts.keywords) } satisfies Tag]
+        : []),
     ])
       tags.set(t.tag, t)
     return { tags: [...tags.values()], children: meta.children }

@@ -3,6 +3,7 @@
 // platform deflate, so a 50 MP export never needs a second full-size buffer.
 import { crc32 } from './crc32'
 import { createDeflater, deflate } from './deflate'
+import { xmpPacket } from './xmp'
 
 export interface PngOptions {
   /** Embedded ICC profile (iCCP). */
@@ -11,6 +12,8 @@ export interface PngOptions {
   srgb?: boolean
   /** TIFF-structured EXIF block (eXIf). */
   exif?: Uint8Array
+  /** Phase 5: keywords, as an XMP packet in an iTXt chunk. */
+  keywords?: readonly string[]
 }
 
 const latin1 = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0))
@@ -81,6 +84,15 @@ export async function encodePng(rgba: Uint8Array | Uint8ClampedArray | Uint16Arr
     parts.push(chunk('iCCP', body))
   } else if (opts.srgb) parts.push(chunk('sRGB', Uint8Array.of(0)))
   if (opts.exif) parts.push(chunk('eXIf', opts.exif))
+  if (opts.keywords?.length) {
+    // iTXt: keyword, NUL, compression flag 0, method 0, empty language tag + NUL, empty translated keyword + NUL, UTF-8 text.
+    const head = latin1('XML:com.adobe.xmp\0\0\0\0\0')
+    const xmp = xmpPacket(opts.keywords)
+    const body = new Uint8Array(head.length + xmp.length)
+    body.set(head)
+    body.set(xmp, head.length)
+    parts.push(chunk('iTXt', body))
+  }
 
   const deflater = createDeflater()
   let cur = new Uint8Array(rowBytes), prev = new Uint8Array(rowBytes)

@@ -26,6 +26,16 @@ Once it's installed, Lumen works offline.
   Olympus/OM, Pentax, DNG and more), plus JPEG, PNG, HEIC and TIFF.
 - Star ratings, pick/reject flags, albums, filters and sorting, multi-select.
 - Copy and paste edits between photos, or apply a preset to a whole selection.
+- **Keywords:** tag one photo or many, browse them in the sidebar, find them in
+  search. Keywords are read from imported files and written into exports.
+- **Compare (C)** two photos with zoom and pan kept in step, or **Survey (N)**
+  a selection; rate and pick as you go.
+- **Merge to HDR or panorama:** select brackets or overlapping shots and choose
+  Merge…. The result is a new RAW (DNG) you edit like any other photo.
+- **Sync** through your own cloud storage: on a computer, pick a folder inside
+  iCloud Drive, Dropbox, OneDrive or Google Drive and Lumen keeps edits,
+  ratings, keywords and albums in step across devices; on phones, export and
+  import a sync file. No account, and nothing goes anywhere else.
 - Back up and restore all your edits as a single file.
 
 **Editor**
@@ -55,7 +65,7 @@ Once it's installed, Lumen works offline.
   lines that should be straight), plus vertical, horizontal, rotate, aspect,
   scale and offset sliders. Masks and spots stay on the content.
 - Seven profiles (Lumen Color, Neutral, Vivid, Portrait, Landscape and more).
-- Before/after (press and hold, split view, or before only), clipping warnings, a live
+- Before/after (press and hold, split view, side by side, or before only), clipping warnings, a live
   histogram, unlimited undo and true 100 % zoom from the full-resolution file.
 - Keyboard shortcuts on desktop (listed in Settings).
 
@@ -102,10 +112,12 @@ Once it's installed, Lumen works offline.
 - JPEG (MozJPEG), PNG or 16-bit TIFF, in sRGB or Display P3, with metadata.
 - Resize on export. It renders in tiles, so full-size exports work even on phones.
 - Save to Files or Downloads, or share straight to other apps.
+- **Export presets** (Web JPEG, Social 1080, Full-size JPEG, Full TIFF 16-bit,
+  or your own) with file-name templates such as `{date}_{name}_{seq}`; export
+  with several presets at once.
 
-**Coming next:** HDR and panorama merge, keywords, side-by-side compare and
-batch export presets. A built-in AI editing assistant (your own OpenAI, Google
-or Anthropic key) is partly built.
+**Coming next:** polish for phones, including RAW on iPhone and iPad. A built-in
+AI editing assistant (your own OpenAI, Google or Anthropic key) is partly built.
 
 ## Good to know
 
@@ -156,6 +168,8 @@ Code map:
 | `src/library/` | Library grid, albums, import and export sheets |
 | `src/editor/` | Editor screen: panels, stage, crop tool, masks and heal/clone tools, desktop and phone layouts, shortcuts |
 | `src/presets/` | The 100 looks, how they apply, the presets panel and screen, Lightroom `.xmp` |
+| `src/merge/` | HDR and panorama merge: alignment, deghosting, projection, blending, written as linear DNGs (`src/io/dng.ts`) |
+| `src/sync/` | Sync through a user-chosen cloud folder or a sync file: per-device catalogs and the merge rules |
 | `src/ai/` | On-device AI: model registry and downloads, ONNX Runtime and MediaPipe in a worker, segmentation, object selection, inpainting, denoise, upscale |
 | `src/lens/` | Lens profiles from the lensfun database: camera and lens matching from EXIF, lensfun's interpolation of distortion, chromatic aberration and vignetting |
 | `src/upright/` | Upright perspective correction: line detection, vanishing points, slider values (the slider math itself is `src/edit/perspective.ts`) |

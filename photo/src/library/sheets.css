@@ -264,3 +264,69 @@
     height: 32px;
   }
 }
+
+/* ---------- Export presets and file names (Phase 5) ---------- */
+.exp-presets {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.exp-presets .field {
+  min-width: 180px;
+  margin: 0;
+}
+.exp-presets.saving {
+  flex-direction: column;
+  align-items: stretch;
+}
+.exp-presets.saving .row {
+  justify-content: flex-end;
+}
+.exp-preset-actions {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.exp-preset-actions .btn {
+  gap: 5px;
+}
+.btn.outline.sm.on {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
+}
+.exp-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+.chip.sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+.exp-several {
+  max-height: 340px;
+  overflow-y: auto;
+}
+.exp-check {
+  gap: 12px;
+  cursor: pointer;
+}
+.exp-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  flex: none;
+}
+.exp-check small {
+  display: block;
+  margin-top: 2px;
+}
+.exp-check.on {
+  background: var(--accent-soft);
+}

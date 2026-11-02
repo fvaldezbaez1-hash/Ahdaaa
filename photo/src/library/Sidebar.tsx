@@ -4,6 +4,8 @@ import { SearchBox } from '../ui/controls'
 import { SMART_VIEWS, formatBytes, plural } from './library'
 import type { Library, LibrarySheet } from './useLibrary'
 import { useStorageInfo } from './useStorageInfo'
+import { syncNow, useSyncStatus } from '../sync/sync'
+import { link } from '../router'
 
 export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s: LibrarySheet) => void; onImportFolder: () => void }) {
   const { counts, view, setView } = lib
@@ -21,7 +23,7 @@ export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s:
           <Icon name="folder" size={16} />
         </button>
       </div>
-      <SearchBox value={lib.search} onChange={lib.setSearch} placeholder="Camera, lens, file name" />
+      <SearchBox value={lib.search} onChange={lib.setSearch} placeholder="Keyword, camera, lens…" />
 
       <nav aria-label="Smart collections">
         <div className="lib-heading">Library</div>
@@ -56,6 +58,30 @@ export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s:
         </button>
       </nav>
 
+      <nav aria-label="Keywords" className="lib-keywords">
+        <div className="lib-heading">Keywords</div>
+        {lib.keywords.length === 0 && <p className="muted small lib-side-note">Add keywords from the info panel or to selected photos, then find them here.</p>}
+        {lib.keywords.map((k) => {
+          const id = `keyword:${k.name}` as const
+          const on = lib.keyword === k.name
+          return (
+            <div key={k.name} className="lib-album">
+              <button type="button" className="lib-nav" aria-current={on ? 'true' : undefined} onClick={() => setView(on ? 'all' : id)}>
+                <span className="cover kw-icon" aria-hidden="true">
+                  <Icon name="tag" size={14} />
+                </span>
+                <span className="ellipsis">{k.name}</span>
+                <span className="count">{k.count.toLocaleString('en-US')}</span>
+              </button>
+              <button type="button" className="more" aria-label={`Options for keyword ${k.name}`} onClick={() => open({ type: 'keywordMenu', name: k.name })}>
+                <Icon name="more" size={16} />
+              </button>
+            </div>
+          )
+        })}
+      </nav>
+
+      <SyncChip />
       <div className="lib-storage">
         <div className="bold" style={{ marginBottom: 4 }}>
           Stored on this device
@@ -78,5 +104,34 @@ export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s:
         )}
       </div>
     </aside>
+  )
+}
+
+/** Sync in progress, or needing a click to go on (permission for the folder lapses between visits). */
+function SyncChip() {
+  const s = useSyncStatus()
+  if (s.state === 'idle') return null
+  if (s.state === 'running')
+    return (
+      <div className="lib-sync" role="status">
+        <Icon name="sync" size={15} className="spin" />
+        <span className="ellipsis">{s.step ?? 'Syncing…'}</span>
+      </div>
+    )
+  if (s.state === 'done')
+    return (
+      <a className="lib-sync done" href={link('/settings')} title={s.message}>
+        <Icon name="check" size={15} />
+        <span className="ellipsis">Synced · {s.message}</span>
+      </a>
+    )
+  return (
+    <div className="lib-sync warn" role="status">
+      <Icon name="sync" size={15} />
+      <span className="grow small">{s.state === 'error' ? `Sync failed: ${s.message}` : 'Sync is paused until you allow the folder again.'}</span>
+      <button type="button" className="btn outline sm" onClick={() => void syncNow(true)}>
+        {s.state === 'error' ? 'Retry' : 'Allow'}
+      </button>
+    </div>
   )
 }

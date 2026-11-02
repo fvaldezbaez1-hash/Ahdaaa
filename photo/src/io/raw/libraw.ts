@@ -10,7 +10,10 @@ import { isIOS, lowMemory } from '../platform'
 import { librawColor, librawPhotoMeta } from './librawMeta'
 import { BackendUnavailable, type RawDecodeResult } from './types'
 
-/** Linear 16-bit camera RGB with the camera's white balance; the engine does the rest. */
+/**
+ * 16-bit camera RGB with the camera's white balance; the engine does the rest. `gamm: [1, 1]` asks for
+ * linear output but libraw-wasm 1.6 ignores it: decoder.ts undoes LibRaw's curve (raw/curve.ts).
+ */
 const SETTINGS: LibRawSettings = { outputBps: 16, gamm: [1, 1], noAutoBright: true, useCameraWb: true, outputColor: 0, userQual: 3, highlight: 0 }
 const IDLE_MS = 15_000
 const HEALTH_TIMEOUT_MS = 30_000

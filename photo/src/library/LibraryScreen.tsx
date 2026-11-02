@@ -1,16 +1,19 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
-import { MenuSheet, type MenuItem } from '../ui/Sheet'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { MenuSheet, Sheet, type MenuItem } from '../ui/Sheet'
 import { Spinner } from '../ui/controls'
 import { useIsPhone } from '../ui/hooks'
 import { Icon } from '../ui/Icon'
 import { toast } from '../ui/toast'
-import { copyEdits, createAlbum, deleteAlbum, removeFromAlbum, removePhotos, renameAlbum, resetEdits, setFlag } from './actions'
+import { copyEdits, createAlbum, deleteAlbum, deleteKeyword, queueThumbnails, removeFromAlbum, removePhotos, renameAlbum, renameKeyword, resetEdits, setFlag } from './actions'
 import { AlbumPicker, NameSheet } from './AlbumSheets'
 import { ConfirmSheet } from './ConfirmSheet'
 import { DesktopLibrary } from './DesktopLibrary'
 import { useDropImport } from './drop'
 import { ExportSheet } from './ExportSheet'
 import { ImportSheet } from './ImportSheet'
+import { KeywordEditor } from './KeywordEditor'
+import { LoupeView } from './Loupe'
+import { MergeSheet } from './MergeSheet'
 import { importer, useImport } from './importer'
 import { EMPTY_SELECTION, plural } from './library'
 import { PhoneLibrary } from './PhoneLibrary'
@@ -19,9 +22,13 @@ import { usePref } from './prefs'
 import { PresetSheet } from './PresetSheet'
 import { useLibrary, type Library, type LibrarySheet } from './useLibrary'
 import { Welcome } from './Welcome'
+import { syncOnOpen } from '../sync/sync'
+import { RENDER_PIPELINE } from '../engine/version'
+import type { PhotoRecord } from '../io/types'
 import './library.css'
 
 const isString = (v: unknown) => typeof v === 'string'
+const thumbQueued = new Set<string>()
 
 export function LibraryScreen() {
   const lib = useLibrary()
@@ -34,6 +41,17 @@ export function LibraryScreen() {
   const startImport = (files: File[]) => void importer.start(files, importPreset || undefined)
   const dragging = useDropImport(startImport)
   const close = useCallback(() => setSheet(null), [])
+
+  // Bring in what other devices changed (sync folder set up and still allowed; otherwise nothing happens).
+  useEffect(() => syncOnOpen(), [])
+  // Photos sync brought from another device get their thumbnails here if the app closed before they were made.
+  useEffect(() => {
+    // …and RAW thumbnails rendered by an older pipeline (see engine RENDER_PIPELINE) re-render lazily.
+    const stale = (p: PhotoRecord) => p.thumbVersion === 0 || (p.kind === 'raw' && (p.thumbPipeline ?? 1) < RENDER_PIPELINE)
+    const missing = lib.photos?.filter((p) => stale(p) && !thumbQueued.has(p.id)).map((p) => p.id) ?? []
+    missing.forEach((id) => thumbQueued.add(id))
+    if (missing.length) queueThumbnails(missing)
+  }, [lib.photos])
 
   useLayoutEffect(() => {
     // Not a React prop: lets the picker choose a whole folder (desktop browsers).
@@ -62,6 +80,7 @@ export function LibraryScreen() {
   return (
     <>
       {screen}
+      {lib.loupe && <LoupeView lib={lib} />}
       <input ref={filesInput} type="file" multiple accept={ACCEPT} hidden onChange={onPicked} />
       <input ref={folderInput} type="file" multiple hidden onChange={onPicked} />
       {dragging && (
@@ -106,6 +125,8 @@ function LibrarySheets({
       return <ImportSheet onClose={close} {...importProps} />
     case 'export':
       return <ExportSheet ids={sheet.ids} onClose={close} />
+    case 'merge':
+      return <MergeSheet ids={sheet.ids} onClose={close} />
     case 'preset':
       return <PresetSheet ids={sheet.ids} onClose={close} />
     case 'album':
@@ -183,10 +204,67 @@ function LibrarySheets({
           you saved them.
         </ConfirmSheet>
       )
+    case 'keywordMenu':
+      return (
+        <MenuSheet
+          title={sheet.name}
+          onClose={close}
+          items={[
+            { label: 'Rename…', icon: 'edit', onClick: () => open({ type: 'renameKeyword', name: sheet.name }) },
+            {
+              label: 'Remove from all photos…',
+              icon: 'trash',
+              danger: true,
+              onClick: () => open({ type: 'deleteKeyword', name: sheet.name, count: lib.keywords.find((k) => k.name === sheet.name)?.count ?? 0 }),
+            },
+          ]}
+        />
+      )
+    case 'renameKeyword':
+      return (
+        <NameSheet
+          title="Rename keyword"
+          initial={sheet.name}
+          confirmLabel="Rename"
+          onClose={close}
+          onSubmit={async (name) => {
+            const n = await renameKeyword(sheet.name, name)
+            if (lib.keyword === sheet.name) lib.setView(`keyword:${name.trim()}`)
+            toast(`Renamed on ${plural(n, 'photo')}`)
+          }}
+        />
+      )
+    case 'deleteKeyword':
+      return (
+        <ConfirmSheet
+          title={`Remove “${sheet.name}”?`}
+          confirmLabel="Remove keyword"
+          onClose={close}
+          onConfirm={async () => {
+            await deleteKeyword(sheet.name)
+            if (lib.keyword === sheet.name) lib.setView('all')
+            close()
+          }}
+        >
+          The keyword comes off {plural(sheet.count, 'photo')}. The photos stay.
+        </ConfirmSheet>
+      )
+    case 'keywords':
+      return (
+        <Sheet title={sheet.ids.length === 1 ? 'Keywords' : `Keywords · ${plural(sheet.ids.length, 'photo')}`} onClose={close}>
+          <div className="stack">
+            <KeywordEditor ids={sheet.ids} autoFocus />
+            <p className="muted small">Separate keywords with commas. Search finds photos by keyword, and the sidebar lists them all.</p>
+          </div>
+        </Sheet>
+      )
     case 'more': {
       const ids = sheet.ids
       const one = ids.length === 1 ? lib.byId.get(ids[0]) : undefined
       const items: MenuItem[] = [
+        { label: 'Keywords…', icon: 'tag', onClick: () => open({ type: 'keywords', ids }) },
+        ...(ids.length >= 2 ? [{ label: 'Compare', icon: 'compare' as const, onClick: () => lib.openCompare(ids) }, { label: 'Survey', icon: 'survey' as const, onClick: () => lib.openSurvey(ids) }] : []),
+        ...(ids.length >= 2 ? [{ label: 'Merge to HDR or panorama…', icon: 'image' as const, onClick: () => open({ type: 'merge', ids }) }] : []),
         { label: 'Mark as pick', icon: 'flag', onClick: () => void setFlag(ids, 1) },
         { label: 'Reject', icon: 'reject', onClick: () => void setFlag(ids, -1) },
         { label: 'Clear flag', icon: 'x', onClick: () => void setFlag(ids, 0) },

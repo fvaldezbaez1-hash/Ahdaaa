@@ -1,0 +1,73 @@
+/* HDR / panorama merge sheet (MergeSheet.tsx). */
+.merge-sources {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.merge-thumb {
+  width: 64px;
+  height: 44px;
+  flex: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel-3);
+}
+.merge-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  height: 42vh;
+  max-height: 380px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.merge-preview canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.merge-preview-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+}
+.merge-error {
+  padding: 0 18px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.merge-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: -8px;
+}
+.merge-wrap {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 899px) {
+  .merge-preview {
+    height: 30vh;
+    min-height: 150px;
+  }
+  .merge-sheet .setting-row {
+    flex-wrap: wrap;
+  }
+  .merge-sheet .setting-row .segmented {
+    width: 100%;
+  }
+}

@@ -32,8 +32,11 @@ export interface HealSettings {
 }
 export type SheetId = 'export' | 'paste' | 'shortcuts' | null
 
+/** The engine's views plus Phase 5's side by side (before and after in two panes, zoomed together). */
+export type CompareMode = ViewMode | 'side'
+
 export interface ViewState {
-  mode: ViewMode
+  mode: CompareMode
   /** Split position 0…1 (before on the left). */
   split: number
   /** Pressing the photo (or holding \) shows the original. */

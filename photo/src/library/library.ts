@@ -1,9 +1,10 @@
 // Pure library logic: which photos a view shows, in what order, and how the
 // grid and selection behave. No React, no database, so it is unit-tested.
 import type { PhotoRecord } from '../io/types'
+import { hasKeyword } from './keywords'
 
-/** Smart collections in the sidebar, or an album (`album:<id>`). */
-export type View = 'all' | 'last' | 'picks' | 'rejected' | 'rated' | 'edited' | `album:${string}`
+/** Smart collections in the sidebar, an album (`album:<id>`) or a keyword (`keyword:<name>`). */
+export type View = 'all' | 'last' | 'picks' | 'rejected' | 'rated' | 'edited' | `album:${string}` | `keyword:${string}`
 export type SortKey = 'taken' | 'added' | 'rating' | 'name'
 /** Minimum star rating (0 = any). */
 export type MinRating = 0 | 3 | 4 | 5
@@ -37,6 +38,10 @@ export function albumIdOf(view: View): string | undefined {
   return view.startsWith('album:') ? view.slice(6) : undefined
 }
 
+export function keywordOf(view: View): string | undefined {
+  return view.startsWith('keyword:') ? view.slice(8) : undefined
+}
+
 export function inView(p: PhotoRecord, view: View, lastImportAt: number): boolean {
   switch (view) {
     case 'all':
@@ -52,14 +57,14 @@ export function inView(p: PhotoRecord, view: View, lastImportAt: number): boolea
     case 'edited':
       return p.edited
     default:
-      return p.albumIds.includes(view.slice(6))
+      return view.startsWith('keyword:') ? hasKeyword(p.keywords, view.slice(8)) : p.albumIds.includes(view.slice(6))
   }
 }
 
-/** Text the search box matches: file name, camera and lens. */
+/** Text the search box matches: file name, camera, lens and keywords. */
 export function searchText(p: PhotoRecord): string {
   const m = p.meta
-  return `${p.fileName} ${m.make ?? ''} ${m.model ?? ''} ${m.lens ?? ''}`.toLowerCase()
+  return `${p.fileName} ${m.make ?? ''} ${m.model ?? ''} ${m.lens ?? ''} ${(p.keywords ?? []).join(' ')}`.toLowerCase()
 }
 
 /** Every whitespace-separated term must appear (so "sony 85" finds Sony shots at 85 mm lenses). */
@@ -94,7 +99,7 @@ export function queryPhotos(photos: readonly PhotoRecord[], q: Query): PhotoReco
 }
 
 export interface Counts {
-  views: Record<Exclude<View, `album:${string}`>, number>
+  views: Record<Exclude<View, `album:${string}` | `keyword:${string}`>, number>
   albums: Map<string, { count: number; cover?: string; coverTakenAt: number }>
   bytes: number
   raw: number
@@ -261,6 +266,8 @@ export type Command =
   | { type: 'clear' }
   | { type: 'copy' }
   | { type: 'paste' }
+  | { type: 'compare' }
+  | { type: 'survey' }
 
 export interface KeyLike {
   key: string
@@ -295,6 +302,9 @@ export function keyCommand(e: KeyLike, mac: boolean): Command | null {
   if (k === 'Enter') return { type: 'open' }
   if (k === 'Delete' || k === 'Backspace') return { type: 'delete' }
   if (k === 'Escape') return { type: 'clear' }
+  // Lightroom's keys: C compares two photos, N surveys the selection.
+  if (k === 'c') return { type: 'compare' }
+  if (k === 'n') return { type: 'survey' }
   return null
 }
 
@@ -376,4 +386,20 @@ export function importSummary(added: number, skipped: readonly { reason: string 
   if (notices.length) parts.push(plural(notices.length, 'note'))
   if (ignored) parts.push(`${plural(ignored, 'other file')} ignored`)
   return parts.join(' · ')
+}
+
+/** Survey: columns for `n` 3:2 cells in a W × H area (each with an `extraH` bar under it), as large as they can be. */
+export function surveyColumns(n: number, W: number, H: number, gap = 10, aspect = 1.5, extraH = 40): number {
+  let best = 1, bestSize = 0
+  for (let cols = 1; cols <= Math.max(1, n); cols++) {
+    const rows = Math.ceil(n / cols)
+    const cw = (W - gap * (cols - 1)) / cols
+    const ch = (H - gap * (rows - 1)) / rows - extraH
+    const size = Math.min(cw, ch * aspect)
+    if (size > bestSize) {
+      bestSize = size
+      best = cols
+    }
+  }
+  return best
 }

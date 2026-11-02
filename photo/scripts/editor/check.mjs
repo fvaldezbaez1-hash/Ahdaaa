@@ -4,7 +4,7 @@
 // and takes screenshots (desktop 1440×900, phone 390×844, dark and light).
 //
 // Usage (from photo/): node scripts/editor/check.mjs <jpeg dir> <raw file> [screenshot dir] [phase…]
-// Phases: desktop phone states raw masks masksPhone ai aiPhone color colorPhone lens lensPhone (default: all), and aiReal
+// Phases: desktop phone states raw masks masksPhone ai aiPhone color colorPhone lens lensPhone workflow (default: all), and aiReal
 // (opt-in: the real on-device models from public/models, slow in software).
 import { createServer } from 'vite'
 import { createRequire } from 'node:module'
@@ -18,7 +18,7 @@ const ROOT = resolve(import.meta.dirname, '../..')
 const ASSETS = resolve(process.argv[2] ?? '.')
 const RAW = process.argv[3] ? resolve(process.argv[3]) : null
 const OUT = resolve(process.argv[4] ?? join(tmpdir(), 'lumen-editor-check'))
-const PHASES = process.argv.slice(5).length ? process.argv.slice(5) : ['desktop', 'phone', 'states', 'raw', 'masks', 'masksPhone', 'ai', 'aiPhone', 'color', 'colorPhone', 'lens', 'lensPhone']
+const PHASES = process.argv.slice(5).length ? process.argv.slice(5) : ['desktop', 'phone', 'states', 'raw', 'masks', 'masksPhone', 'ai', 'aiPhone', 'color', 'colorPhone', 'lens', 'lensPhone', 'workflow']
 const PORT = 5204
 const URL = `http://localhost:${PORT}/`
 mkdirSync(OUT, { recursive: true })
@@ -1303,6 +1303,74 @@ async function lensPhone() {
   await page.context().close()
 }
 
+// ── Phase 5: keywords in the editor, side by side ─────────────────────
+
+async function workflowPhase() {
+  console.log('workflow')
+  const page = await open({ width: 1440, height: 900 })
+  const [id] = await importPhotos(page, ['/__assets/photo-21.jpg'])
+  await openEditor(page, id)
+  // Keywords under the photo info.
+  await page.locator('.ed-keywords .kw-input').click()
+  await page.keyboard.type('Lighthouse, Maine')
+  await page.keyboard.press('Enter')
+  const kw = await until(page, async (id) => (await (await import('/src/io/db.ts')).db.photos.get(id)).keywords?.length === 2 && (await (await import('/src/io/db.ts')).db.photos.get(id)).keywords, id)
+  check(kw.join() === 'Lighthouse,Maine', `editor keywords: ${kw.join(', ')}`)
+  await page.keyboard.press('z')
+  check((await state(page)).zoom === 1, 'shortcuts pause while typing a keyword')
+  await page.locator('.ed-keywords .kw-input').fill('')
+  await page.locator('.ed-keywords .kw-input').blur()
+  await page.locator('.ed-keywords .kw-chip', { hasText: 'Maine' }).getByRole('button').click()
+  check((await until(page, async (id) => (await (await import('/src/io/db.ts')).db.photos.get(id)).keywords?.length === 1, id)), 'a keyword comes off in the editor')
+
+  // Side by side: before on the left, after on the right, zoomed together.
+  await dragSlider(page, 'Exposure', 0.15)
+  await page.getByRole('button', { name: 'Side by side', exact: true }).click()
+  await page.waitForTimeout(400)
+  check((await state(page)).mode === 'side' && (await page.locator('.ed-stage[data-side="h"]').count()) === 1, 'Side by side mode')
+  const panes = async () =>
+    page.evaluate(() => {
+      const r = (el) => el.getBoundingClientRect()
+      const before = r(document.querySelector('.ed-before-pane')), after = r(document.querySelector('.ed-photo')), stage = r(document.querySelector('.ed-stage'))
+      const px = (sel, x, y) => {
+        const c = document.createElement('canvas')
+        const src = document.querySelector(sel)
+        c.width = src.width
+        c.height = src.height
+        const g = c.getContext('2d')
+        g.drawImage(src, 0, 0)
+        return [...g.getImageData(Math.floor(src.width * x), Math.floor(src.height * y), 1, 1).data.slice(0, 3)]
+      }
+      return { before: [before.left - stage.left, before.top - stage.top, before.width, before.height], after: [after.left - stage.left, after.top - stage.top, after.width, after.height], half: stage.width / 2, bpx: px('.ed-before-pane', 0.5, 0.6) }
+    })
+  let p = await panes()
+  check(Math.abs(p.before[2] - p.after[2]) < 1 && Math.abs(p.after[0] - p.before[0] - p.half) < 1 && p.before[0] + p.before[2] <= p.half + 1, `two equal panes (${p.before.map(Math.round)} | ${p.after.map(Math.round)})`)
+  check(p.bpx.some((v) => v > 0), `the original is drawn on the left (${p.bpx})`)
+  await shot(page, 'p5-side-by-side')
+  await page.keyboard.press('z')
+  await page.waitForTimeout(500)
+  p = await panes()
+  check(p.after[2] > p.half && Math.abs(p.after[0] - p.before[0] - p.half) < 1, 'zoom moves both panes together')
+  await shot(page, 'p5-side-by-side-zoomed')
+  await page.keyboard.press('z')
+  await setTheme(page, 'light')
+  await shot(page, 'p5-side-by-side-light')
+  await setTheme(page, 'dark')
+  await page.keyboard.press('Shift+Y')
+  check((await state(page)).mode === 'after' && (await page.locator('.ed-before-pane').count()) === 0, '⇧Y leaves side by side')
+  await page.keyboard.press('Shift+Y')
+  check((await state(page)).mode === 'side', '⇧Y turns it on')
+  // A tall window stacks them.
+  await page.setViewportSize({ width: 1000, height: 1300 })
+  await page.waitForTimeout(500)
+  check((await page.locator('.ed-stage[data-side="v"]').count()) === 1, 'a tall window stacks before above after')
+  await shot(page, 'p5-side-by-side-tall')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.keyboard.press('Shift+Y')
+  check(page.errors.length === 0, `no page errors ${page.errors.join(' | ')}`)
+  await page.context().close()
+}
+
 try {
   if (PHASES.includes('desktop')) await desktop()
   if (PHASES.includes('phone')) await phone()
@@ -1317,6 +1385,7 @@ try {
   if (PHASES.includes('colorPhone')) await colorPhone()
   if (PHASES.includes('lens')) await lensPhase()
   if (PHASES.includes('lensPhone')) await lensPhone()
+  if (PHASES.includes('workflow')) await workflowPhase()
 } catch (e) {
   failures.push(String(e))
   console.log('ERROR', e)

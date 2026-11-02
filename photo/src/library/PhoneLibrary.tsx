@@ -109,14 +109,23 @@ export function PhoneLibrary({ lib, open }: { lib: Library; open: (s: LibraryShe
           </div>
         )}
         <Segmented className="plib-seg" label="Filter" value={filter as Filter} options={FILTERS} onChange={setFilter} />
-        {lib.albums.length > 0 && (
-          <div className="chips no-scrollbar" role="group" aria-label="Albums">
+        {(lib.albums.length > 0 || lib.keywords.length > 0) && (
+          <div className="chips no-scrollbar" role="group" aria-label="Albums and keywords">
             {lib.albums.map((a) => {
               const on = view === `album:${a.id}`
               return (
                 <button key={a.id} type="button" className={on ? 'chip on' : 'chip'} aria-pressed={on} onClick={() => lib.setView(on ? 'all' : `album:${a.id}`)}>
                   <Icon name="album" size={14} />
                   {a.name}
+                </button>
+              )
+            })}
+            {lib.keywords.map((k) => {
+              const on = lib.keyword === k.name
+              return (
+                <button key={`kw-${k.name}`} type="button" className={on ? 'chip on' : 'chip'} aria-pressed={on} onClick={() => lib.setView(on ? 'all' : `keyword:${k.name}`)}>
+                  <Icon name="tag" size={14} />
+                  {k.name}
                 </button>
               )
             })}

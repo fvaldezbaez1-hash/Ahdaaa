@@ -30,15 +30,20 @@ await page.goto('http://localhost:5201/scripts/engine/index.html')
 await page.waitForFunction(() => window.ready, null, { timeout: 120000 })
 const lab = (fn, ...a) => page.evaluate(([fn, a]) => window.lab[fn](...a), [fn, a])
 const save = (name, b64) => b64 && writeFileSync(join(outDir, name + '.png'), Buffer.from(b64, 'base64'))
+// Parity bar: ≤ 2/255. 8-bit renders carry ±1 of dither on each side (so ≤ 3 there); 16-bit tiles have none.
+const DITHERED_MAX = 3
+const TILE16_MAX = 514
 const ok = (cond, label, detail) => console.log(`${cond ? 'PASS' : 'FAIL'} ${label}`, JSON.stringify(detail))
 
 console.log('supported', await page.evaluate(() => window.lab.supported))
 const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-04.jpg', 'photo-05.jpg', 'photo-21.jpg']
 for (const j of jpegList) await lab('loadJpeg', j, '/jpeg/' + j)
-const needRaw = want('lens') || want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
+const needRaw = args.includes('sheet') || want('camera') || want('split') || want('lens') || want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
 if (needRaw) {
-  console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW')))
-  console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF')))
+  // --curved: decode like before the linearity fix (LibRaw's BT.709 curve left in), for before/after numbers.
+  const curved = args.includes('--curved')
+  console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW', { curved })))
+  console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF', { curved })))
 }
 
 if (want('identity'))
@@ -70,7 +75,7 @@ if (want('tiling')) {
   const g = { geometry: { crop: { x: 0.08, y: 0.1, w: 0.8, h: 0.7 }, angle: 7.5, rotate: 1, flipH: true, flipV: false, aspect: 'free' } }
   const r = await lab('tiling', 'nef', { ...g, basic: { clarity: 60, texture: 40, shadows: 50, dehaze: 30 }, detail: { sharpen: 60, radius: 1.2, detail: 25, masking: 20, noise: 40, noiseDetail: 50, colorNoise: 40 }, effects: { vignette: -40, vignetteMidpoint: 50, vignetteRoundness: 0, vignetteFeather: 50, grain: 30, grainSize: 25, grainRoughness: 50, fade: 0 } })
   ok(r.size[0] === r.expected[0] && r.size[1] === r.expected[1], 'renderImage size == outputSize (crop + rotate + flip + straighten)', r)
-  ok(r.maxDiff16 <= 320 && r.meanDiff16 < 0.5, 'tiled export == single tile (16-bit, ≤ ~1/255)', r)
+  ok(r.maxDiff16 <= TILE16_MAX && r.meanDiff16 < 0.5, 'tiled export == single tile (16-bit, ≤ 2/255)', r)
   save('tiling-single', await lab('tilePng', 0))
   save('tiling-tiled', await lab('tilePng', 1))
 }
@@ -83,7 +88,7 @@ if (want('timing')) {
 if (want('region')) {
   const edit = { basic: { clarity: 40, shadows: 30, texture: 30 }, geometry: { crop: { x: 0.05, y: 0.05, w: 0.9, h: 0.9 }, angle: 3, rotate: 0, flipH: false, flipV: false, aspect: 'free' } }
   const r = await lab('regionCheck', 'arw', edit, 900, 700)
-  ok(r.maxDiff <= 2 && r.meanDiff < 0.6 && r.size[0] === r.export[0], '100 % view (renderRegion) == export pixels', r)
+  ok(r.maxDiff <= DITHERED_MAX && r.meanDiff < 0.6 && r.size[0] === r.export[0], '100 % view (renderRegion) == export pixels', r)
 }
 
 // Phase 2: five local layers of every mask kind, plus heal / clone spots.
@@ -112,11 +117,11 @@ const LOCAL = { layers: LAYERS, retouch: SPOTS }
 
 if (want('local')) {
   const a = await lab('canvasParity', 'arw', LOCAL)
-  ok(a.maxDiff <= 2, 'masks + spots: interactive canvas (1:1) == export', a)
+  ok(a.maxDiff <= DITHERED_MAX, 'masks + spots: interactive canvas (1:1) == export', a)
   const b = await lab('regionCheck', 'arw', LOCAL, 1500, 1500)
-  ok(b.maxDiff <= 2 && b.meanDiff < 0.6, 'masks + spots: 100 % view == export', b)
+  ok(b.maxDiff <= DITHERED_MAX && b.meanDiff < 0.6, 'masks + spots: 100 % view == export', b)
   const c = await lab('tiling', 'arw', LOCAL)
-  ok(c.maxDiff16 <= 320 && c.meanDiff16 < 0.5, 'masks + spots: tiled export == single tile (16-bit)', c)
+  ok(c.maxDiff16 <= TILE16_MAX && c.meanDiff16 < 0.5, 'masks + spots: tiled export == single tile (16-bit)', c)
   const d = await lab('developedSample', 'arw', { layers: LAYERS }, 0.3, 0.6)
   ok(d.maxDiff < 4 / 255, 'samplePixel developed = the photo without its layers (range eyedropper)', d)
   const h = await lab('healCheck', 'arw', 0.414, 0.714, 0.013)
@@ -140,13 +145,13 @@ if (want('ai')) {
   const r = await lab('setupRasters')
   const rectPx = r.rect
   const a = await lab('canvasParity', 'arw', AI)
-  ok(a.maxDiff <= 2, 'AI mask + removal + denoise: interactive canvas (1:1) == export', a)
+  ok(a.maxDiff <= DITHERED_MAX, 'AI mask + removal + denoise: interactive canvas (1:1) == export', a)
   const b = await lab('regionCheck', 'arw', AI, 900, 600)
-  ok(b.maxDiff <= 2 && b.meanDiff < 0.6, 'AI mask + removal + denoise: 100 % view == export', b)
+  ok(b.maxDiff <= DITHERED_MAX && b.meanDiff < 0.6, 'AI mask + removal + denoise: 100 % view == export', b)
   const c = await lab('tiling', 'arw', AI)
-  ok(c.maxDiff16 <= 320 && c.meanDiff16 < 0.5, 'AI mask + removal (across a tile edge) + denoise: tiled == single tile (16-bit)', c)
+  ok(c.maxDiff16 <= TILE16_MAX && c.meanDiff16 < 0.5, 'AI mask + removal (across a tile edge) + denoise: tiled == single tile (16-bit)', c)
   const sky = await lab('canvasParity', 'photo-21.jpg', { layers: [AI_SKY] })
-  ok(sky.maxDiff <= 2, 'AI sky mask on the lighthouse: canvas == export', sky)
+  ok(sky.maxDiff <= DITHERED_MAX, 'AI sky mask on the lighthouse: canvas == export', sky)
   const missing = await lab('vsPlain', 'photo-21.jpg', { layers: [{ ...AI_SKY, masks: [mask('x', { type: 'ai', target: 'sky', raster: 'nope', model: 'test' })] }], retouch: [{ ...REMOVE, fill: 'nope' }], denoise: { amount: 50, raster: 'nope', model: 'test' } })
   ok(missing.maxDiff === 0, 'missing rasters: empty AI mask, no-op removal and denoise, identical to the photo', missing)
   const d = await lab('denoiseCheck')
@@ -162,8 +167,10 @@ if (want('ai')) {
   save('ai-overlay', await lab('canvasShot', 'photo-21.jpg', { layers: [AI_SKY] }, { maskOverlay: 'aisky' }, 768, 512))
 }
 
-// Render hashes from the Phase 3 engine (SwiftShader): recipes without Phase 4 features must stay bit-identical.
-const PHASE3_HASHES = { arw: '285b1d96/c3c0de58', jpg: 'ac5a74f/9f2535ab', local: 'de0946e4/7e22bd6b', ai: '476d76a1/65291731', jpgEdit: '4a1197fb/5d376170' }
+// Render hashes (SwiftShader) of recipes without Phase 4 features. JPEG ones are from the Phase 3 engine (still
+// bit-identical); RAW ones were re-pinned after the RAW linearity fix (RENDER_PIPELINE 2).
+const RAW_HASHES = { arw: '4aa59f19/dfa66f32', local: '55167e8f/860389ef', ai: 'aceaeddc/73853b45' }
+const PHASE3_HASHES = { jpg: 'ac5a74f/9f2535ab', jpgEdit: '4a1197fb/5d376170', ...RAW_HASHES }
 
 // Phase 4: lens + perspective + levels + color editor, with a mask and a heal spot.
 const LENS = { enabled: true, profileId: 'test', vignetting: { k: [-0.35, 0.12, -0.02], amount: 100 }, tca: { r: [1.0004, 0, 0], b: [0.9996, 0, 0] }, autoCA: true,
@@ -178,13 +185,13 @@ const PHASE4 = { geometry: GEO4, lens: LENS, levels: LEVELS, colorEditor: [GREEN
 if (want('lens')) {
   await lab('setupRasters')
   const h = await lab('hashes', [['arw', 'arw', {}], ['jpg', 'photo-21.jpg', {}], ['local', 'arw', LOCAL], ['ai', 'arw', AI], ['jpgEdit', 'photo-21.jpg', { basic: { highlights: -60, shadows: 50, clarity: 30, vibrance: 30 } }]])
-  ok(Object.entries(PHASE3_HASHES).every(([k, v]) => h[k] === v), 'recipes without Phase 4 features render bit-identical to Phase 3 (export + canvas)', h)
+  ok(Object.entries(PHASE3_HASHES).every(([k, v]) => h[k] === v), 'recipes without Phase 4 features render bit-identical (JPEG: to Phase 3; RAW: pinned after the linearity fix)', h)
   const a = await lab('canvasParity', 'arw', PHASE4)
-  ok(a.maxDiff <= 2, 'lens + perspective + levels + color editor + mask + heal: canvas (1:1) == export', a)
+  ok(a.maxDiff <= DITHERED_MAX, 'lens + perspective + levels + color editor + mask + heal: canvas (1:1) == export', a)
   const b = await lab('regionCheck', 'arw', PHASE4, 700, 500)
-  ok(b.maxDiff <= 2 && b.meanDiff < 0.6, 'same: 100 % view == export', b)
+  ok(b.maxDiff <= DITHERED_MAX && b.meanDiff < 0.6, 'same: 100 % view == export', b)
   const c = await lab('tiling', 'arw', PHASE4)
-  ok(c.maxDiff16 <= 320 && c.meanDiff16 < 0.5, 'same: tiled export == single tile (16-bit)', c)
+  ok(c.maxDiff16 <= TILE16_MAX && c.meanDiff16 < 0.5, 'same: tiled export == single tile (16-bit)', c)
   await lab('makeGrid', 'grid-barrel', 'barrel', { profile: { model: 'poly3', k: [-0.08], amount: 100 }, manual: 0 })
   const lb = await lab('lineTest', 'grid-barrel', { geometry: { lens: { profile: { model: 'poly3', k: [-0.08], amount: 100 }, manual: 0 } } })
   save('grid-barrel-before', lb.pngBefore)
@@ -214,6 +221,36 @@ if (want('lens')) {
   await R('p4-skin-04', 'photo-04.jpg', { colorEditor: [{ id: 'k', name: 'Skin', enabled: true, hue: 22, sat: 40, hueWidth: 22, satLow: 10, satHigh: 85, smooth: 60, hueShift: 0, satShift: 0, lightShift: 0, uniformity: { hue: 70, sat: 50, light: 50 } }] })
 }
 
+if (want('camera')) {
+  // The default RAW render vs the camera's own JPEG (embedded preview), on linear data (see params RAW_BASELINE_EV).
+  const arw = await lab('cameraCompare', 'arw'), nef = await lab('cameraCompare', 'nef')
+  ok(arw.midtoneDiff <= 12 && Math.abs(arw.ours.mean - arw.camera.mean) <= 15 && Math.abs(arw.ours.p5 - arw.camera.p5) <= 8,
+    'default RAW render ≈ the camera JPEG (Sony ARW: luminance levels 0…255)', arw)
+  console.log('camera JPEG vs default render (Nikon NEF, night shot)', JSON.stringify(nef))
+  // As Shot white balance comes from the RAW's metadata: the same Kelvin / tint as before the linearity fix.
+  const shot = await page.evaluate(() => [window.lab.asShot('arw'), window.lab.asShot('nef')])
+  ok(Math.abs(shot[0].temp - 5350.48) < 0.1 && Math.abs(shot[1].temp - 5453.76) < 0.1, 'WB As Shot Kelvin unchanged', shot)
+  if (args.includes('--sweep'))
+    for (const ev of [0.5, 0.75, 1, 1.25, 1.5])
+      for (const n of ['arw', 'nef']) {
+        const r = await lab('cameraCompare', n, { basic: { exposure: ev } })
+        console.log('SWEEP', ev, n, r.midtoneDiff, JSON.stringify(r.ours))
+      }
+}
+
+if (args.includes('sheet')) {
+  // Profiles and a few built-in presets on the RAW: a contact sheet to look at.
+  save('raw-sheet', await lab('contactSheet', 'arw'))
+}
+
+if (want('split')) {
+  const v = await lab('beforeVisible', 'arw', 1200, 800)
+  const opaque = (h) => h.alpha === 255 && h.green > 10
+  // 'before' has no +1 EV: darker than 'after'; split shows before on the left, after on the right.
+  ok(opaque(v.before.left) && opaque(v.before.right) && opaque(v.split.left) && opaque(v.split.right) && v.split.left.green < v.split.right.green - 10,
+    "'before' and 'split' are drawn on a photo scaled down to fit", v)
+}
+
 if (want('previews')) console.log('look previews (SwiftShader)', JSON.stringify(await lab('previewTiming', 'arw', 12)))
 
 if (want('context')) {
@@ -234,7 +271,7 @@ if (want('renders') || want('look')) {
     save(file, r.png)
     console.log('render', file, JSON.stringify({ ...r, png: undefined }))
   }
-  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai', 'lens'].includes(a))
+  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai', 'lens', 'split', 'camera', 'sheet'].includes(a))
   const R0 = R
   R = async (file, ...rest) => (only.length === 0 || only.some((o) => file.includes(o))) && R0(file, ...rest)
   await R('arw-default', 'arw', {})

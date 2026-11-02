@@ -52,11 +52,20 @@ export interface PhotoRecord {
   editedAt?: number
   /** Bumped whenever the thumbnail is re-rendered. */
   thumbVersion: number
+  /** engine RENDER_PIPELINE the thumbnail was rendered with (absent = 1); older RAW thumbnails re-render. */
+  thumbPipeline?: number
   /**
    * RAW file shown through the camera's embedded JPEG preview because no RAW
    * decoder could develop it (kind is then 'display'). Re-decode when one can.
    */
   previewOnly?: boolean
+  /** Phase 5: keywords (tags), unique ignoring case, in the order added. */
+  keywords?: string[]
+  /**
+   * Phase 5: made by merging other photos (HDR or panorama). Its original is a linear DNG that
+   * Lumen wrote, so it decodes and edits like any RAW. `sources` are the merged photos' ids.
+   */
+  merged?: { kind: 'hdr' | 'pano'; sources: string[]; at: number }
 }
 
 export interface OriginalRecord {
@@ -121,4 +130,8 @@ export interface ExportOptions {
   stripLocation: boolean
   /** Phase 3: AI "Super Resolution" — 2 doubles width and height before `longEdge` applies. */
   upscale?: 1 | 2
+  /** Phase 5: write the photo's keywords (XMP, plus IPTC in JPEG and TIFF). Default on. */
+  includeKeywords?: boolean
+  /** Phase 5: file name template, e.g. "{name}-web" (see library/fileNames.ts). Default "{name}-lumen". */
+  fileName?: string
 }

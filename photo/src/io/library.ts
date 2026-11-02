@@ -1,6 +1,7 @@
 // Library bookkeeping: import, recipe saves, thumbnails, deletion.
 import { defaultRecipe, isUnedited } from '../edit/defaults'
 import type { EditRecipe, Preset } from '../edit/types'
+import { RENDER_PIPELINE } from '../engine/version'
 import { applyPreset, findBuiltin } from '../presets/catalog'
 import { isAbort } from './abort'
 import { db, uid } from './db'
@@ -9,6 +10,7 @@ import { isSupportedFile, mimeOf } from './formats'
 import { seams } from './seams'
 import type { PhotoRecord } from './types'
 import { cachedWorking, decodeStored, forgetWorking } from './working'
+import { cleanKeywords } from '../library/keywords'
 
 /** Long edge of the preview decoded at import (thumbnail source; also what the editor could show first). */
 const IMPORT_PREVIEW_EDGE = 2560
@@ -74,6 +76,8 @@ export async function importFiles(files: File[], opts: ImportOptions = {}): Prom
         continue
       }
       const asShot = d.raw?.asShot
+      // Keywords the file already has (Lightroom, Bridge, Photos…); never a reason to fail the import.
+      const keywords = cleanKeywords(await seams.keywords(file).catch(() => []))
       let recipe = defaultRecipe(d.kind, asShot)
       if (preset) recipe = applyPreset(recipe, preset, 100, 'original', d.kind)
       const thumb = await seams.thumbnail(d, recipe)
@@ -97,7 +101,9 @@ export async function importFiles(files: File[], opts: ImportOptions = {}): Prom
         edited: !isUnedited(recipe, d.kind, asShot),
         editedAt: undefined,
         thumbVersion: 1,
+        thumbPipeline: RENDER_PIPELINE,
         previewOnly: d.previewOnly || undefined,
+        keywords: keywords.length ? keywords : undefined,
       })
       await db.transaction('rw', [db.photos, db.originals, db.thumbs, db.albums], async () => {
         await db.photos.add(rec)
@@ -141,7 +147,7 @@ async function renderThumb(id: string): Promise<void> {
     const cur = await db.photos.get(id)
     if (!cur) return // deleted meanwhile
     await db.thumbs.put({ id, ...thumb })
-    await db.photos.update(id, { thumbVersion: cur.thumbVersion + 1 })
+    await db.photos.update(id, { thumbVersion: cur.thumbVersion + 1, thumbPipeline: RENDER_PIPELINE })
   })
 }
 

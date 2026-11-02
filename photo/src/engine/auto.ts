@@ -6,7 +6,7 @@ import type { Vec3 } from '../color/matrices'
 import { rawWbForNeutral, relativeWbForNeutral, tempTintFromMultipliers } from '../color/wb'
 import type { Basic, EditRecipe } from '../edit/types'
 import type { FloatImage } from './image'
-import { inputTransform, toWorkingSpace } from './params'
+import { inputTransform, RAW_BASELINE_EV, toWorkingSpace } from './params'
 import type { SourceColor } from './types'
 
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x))
@@ -78,7 +78,8 @@ export function autoSettings(img: FloatImage, color: SourceColor, recipe: EditRe
   const raw = color.space === 'camera'
 
   const p50 = pct(0.5)
-  let e = Math.log2(0.16 / p50)
+  // Median toward 0.11 of scene white: through the filmic curve that's about a camera JPEG's brightness.
+  let e = Math.log2((raw ? 0.11 : 0.16) / p50)
   // Don't brighten so far that the top 1 % blows out — shadows do the rest.
   if (e > 0) e = Math.min(e, Math.max(0, Math.log2(1.6 / pct(0.99))))
   e = clamp(raw ? e : e * 0.6, raw ? -2.5 : -1.5, raw ? 2.5 : 1.5)
@@ -95,7 +96,8 @@ export function autoSettings(img: FloatImage, color: SourceColor, recipe: EditRe
 
   return {
     basic: {
-      exposure: Math.round(e * 20) / 20,
+      // `e` is the total scaling; RAW renders with its baseline on top of the slider.
+      exposure: Math.round((e - (raw ? RAW_BASELINE_EV : 0)) * 20) / 20,
       contrast: Math.round(contrast),
       highlights: Math.round(highlights),
       shadows: Math.round(shadows),

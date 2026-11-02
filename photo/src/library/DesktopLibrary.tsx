@@ -73,7 +73,7 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
   }
 
   const onKey = useEffectEvent((e: KeyboardEvent) => {
-    if (e.defaultPrevented || isTyping(e) || document.querySelector('.sheet-backdrop')) return
+    if (e.defaultPrevented || isTyping(e) || document.querySelector('.sheet-backdrop') || lib.loupe) return
     const cmd = keyCommand(e, isApple)
     if (!cmd) return
     const t = e.target as HTMLElement
@@ -103,6 +103,16 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
         if (window.getSelection()?.toString() || !lib.focused) return
         e.preventDefault()
         void copyEdits(lib.focused)
+        return
+      case 'compare':
+        if (!order.length) return
+        e.preventDefault()
+        lib.openCompare(targets.length >= 2 ? targets : lib.focused ? [lib.focused.id] : [])
+        return
+      case 'survey':
+        if (targets.length < 2) return
+        e.preventDefault()
+        lib.openSurvey(targets)
         return
     }
     if (!targets.length) return
@@ -185,6 +195,26 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
           </label>
           <button
             type="button"
+            className="icon-btn"
+            aria-label="Compare"
+            title={selected.length >= 2 ? 'Compare the selected photos (C)' : 'Compare with the next photo (C)'}
+            disabled={!order.length}
+            onClick={() => lib.openCompare(selected.length >= 2 ? selected : lib.focused ? [lib.focused.id] : [])}
+          >
+            <Icon name="compare" />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Survey"
+            title="Survey the selected photos (N)"
+            disabled={selected.length < 2}
+            onClick={() => lib.openSurvey(selected)}
+          >
+            <Icon name="survey" />
+          </button>
+          <button
+            type="button"
             className={infoOpen ? 'icon-btn on' : 'icon-btn'}
             aria-pressed={infoOpen}
             aria-label="Photo info panel"
@@ -257,6 +287,7 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
           <div className="lib-batch" role="toolbar" aria-label="Selected photos">
             <span className="count">{selected.length.toLocaleString('en-US')} selected</span>
             <BatchButton icon="presets" label="Apply preset" onClick={() => open({ type: 'preset', ids: selected })} />
+            <BatchButton icon="tag" label="Keywords" onClick={() => open({ type: 'keywords', ids: selected })} />
             <BatchButton icon="paste" label="Paste edits" onClick={() => void pasteEdits(selected)} />
             <BatchButton icon="undo" label="Reset edits" onClick={() => open({ type: 'reset', ids: selected })} />
             {lib.album ? (
@@ -264,6 +295,7 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
             ) : (
               <BatchButton icon="album" label="Add to album" onClick={() => open({ type: 'album', ids: selected })} />
             )}
+            {selected.length >= 2 && <BatchButton icon="image" label="Merge…" onClick={() => open({ type: 'merge', ids: selected })} />}
             <BatchButton icon="download" label="Export" onClick={() => open({ type: 'export', ids: selected })} />
             <BatchButton icon="trash" label="Delete" danger onClick={() => open({ type: 'delete', ids: selected })} />
             <span className="sep" />

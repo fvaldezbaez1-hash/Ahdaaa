@@ -11,6 +11,8 @@ export const seams: {
   thumbnail: typeof makeThumbnail
   render: typeof renderPhoto
   encode: (args: EncodeArgs, signal?: AbortSignal) => Promise<Blob>
+  /** Phase 5: keywords in a file being imported (XMP / IPTC). */
+  keywords: (file: Blob) => Promise<string[]>
   /** When set, exports go here instead of to the user (tests). */
   sink: ExportSink | null
 } = {
@@ -19,5 +21,6 @@ export const seams: {
   render: renderPhoto,
   // The pixel buffer moves to the worker: the caller must not use it afterwards.
   encode: (args, signal) => work('encode', args, [args.rgba.buffer as ArrayBuffer], signal),
+  keywords: async (blob) => work('keywords', { blob }),
   sink: null,
 }
