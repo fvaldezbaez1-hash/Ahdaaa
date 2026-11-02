@@ -4,6 +4,8 @@ import { createEngine } from '/src/engine/index.ts'
 import { renderTiled } from '/src/engine/export.ts'
 import { detectCaps, Gpu } from '/src/engine/gl.ts'
 import { boxReduce } from '/src/engine/image.ts'
+import { linearizeLibraw } from '/src/io/raw/curve.ts'
+import { findEmbeddedJpeg } from '/src/io/raw/embedded.ts'
 import { defaultRecipe, normalizeRecipe } from '/src/edit/defaults.ts'
 import { mat3 } from '/src/color/matrices.ts'
 import { rawWbForNeutral, relativeWbForNeutral, tempTintFromMultipliers } from '/src/color/wb.ts'
@@ -32,10 +34,11 @@ async function loadJpeg(name, url) {
   return { width: bmp.width, height: bmp.height }
 }
 
-async function loadRaw(name, url) {
+async function loadRaw(name, url, opts = {}) {
   const t0 = performance.now()
   const raw = new LibRaw()
-  await raw.open(new Uint8Array(await (await fetch(url)).arrayBuffer()), { outputBps: 16, gamm: [1, 1], noAutoBright: true, useCameraWb: true, outputColor: 0, userQual: 3, halfSize: true })
+  const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer())
+  await raw.open(bytes.slice(), { outputBps: 16, gamm: [1, 1], noAutoBright: true, useCameraWb: true, outputColor: 0, userQual: 3, halfSize: true })
   const meta = await raw.metadata(true)
   const img = await raw.imageData()
   raw.dispose()
@@ -45,7 +48,9 @@ async function loadRaw(name, url) {
   const m = c.cam_mul
   const shotMul = [m[0] / m[1], 1, m[2] / m[1]]
   const data = img.data instanceof Uint16Array ? img.data : new Uint16Array(img.data.buffer)
-  photos[name] = { image: { width: img.width, height: img.height, data, fullWidth: img.width * 2 }, color: { kind: 'raw', space: 'camera', rgbCam, camXyz, shotMul } }
+  // Like the app's decode path: undo the curve libraw-wasm applies (opts.curved keeps it, as before the fix).
+  if (!opts.curved) linearizeLibraw(data)
+  photos[name] = { image: { width: img.width, height: img.height, data, fullWidth: img.width * 2 }, color: { kind: 'raw', space: 'camera', rgbCam, camXyz, shotMul }, bytes }
   return { width: img.width, height: img.height, ms: Math.round(performance.now() - t0), asShot: tempTintFromMultipliers(camXyz, shotMul), shotMul }
 }
 
@@ -262,6 +267,7 @@ async function fullExport(url) {
   const meta = await raw.metadata(true)
   const img = await raw.imageData()
   raw.dispose()
+  linearizeLibraw(img.data)
   const c = meta.color_data
   const color = { kind: 'raw', space: 'camera', rgbCam: mat3([0, 1, 2].map((r) => [0, 1, 2].map((k) => c.rgb_cam[r][k]))), camXyz: mat3([0, 1, 2].map((r) => [0, 1, 2].map((k) => c.cam_xyz[r][k]))), shotMul: [c.cam_mul[0] / c.cam_mul[1], 1, c.cam_mul[2] / c.cam_mul[1]] }
   photos.full = { image: { width: img.width, height: img.height, data: img.data }, color }
@@ -670,5 +676,57 @@ async function beforeVisible(name, cw, ch) {
   return { after: stats('after'), before: stats('before'), split: stats('split') }
 }
 
-window.lab = { beforeVisible, makeGrid, lineTest, autoCATest, defringeTest, hashes, vsPlain, setupRasters, denoiseCheck, removalCheck, developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
+/** Luminance statistics (Rec.709 luma of encoded sRGB, 0…255) of RGBA pixels. */
+function lumaStats(rgba) {
+  const v = []
+  for (let i = 0; i < rgba.length; i += 4) if (rgba[i + 3] > 127) v.push(0.2126 * rgba[i] + 0.7152 * rgba[i + 1] + 0.0722 * rgba[i + 2])
+  v.sort((a, b) => a - b)
+  const q = (p) => Math.round(v[Math.min(v.length - 1, Math.floor(p * v.length))] * 10) / 10
+  const curve = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95].map(q)
+  return { mean: Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10, p5: curve[0], p25: q(0.25), p50: q(0.5), p75: q(0.75), p95: curve[10], curve }
+}
+
+/** The default render of a RAW vs the camera's own JPEG (its embedded preview): brightness and contrast. */
+async function cameraCompare(name, patch = {}) {
+  const p = photos[name]
+  const e = findEmbeddedJpeg(p.bytes)
+  const bmp = await createImageBitmap(new Blob([p.bytes.subarray(e.offset, e.offset + e.length)], { type: 'image/jpeg' }))
+  const c = new OffscreenCanvas(bmp.width, bmp.height), ctx = c.getContext('2d')
+  ctx.drawImage(bmp, 0, 0)
+  const cam = lumaStats(ctx.getImageData(0, 0, bmp.width, bmp.height).data)
+  const r = await engine.renderImage(recipeFor(name, patch), p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', maxLongEdge: Math.max(bmp.width, bmp.height), rasters })
+  const ours = lumaStats(r.data)
+  // Midtones: mean |Δ| of the luminance percentile curves between 20 % and 80 %.
+  const mid = ours.curve.slice(2, 9).reduce((s, v, i) => s + Math.abs(v - cam.curve[i + 2]), 0) / 7
+  return { camera: { ...cam, curve: undefined }, ours: { ...ours, curve: undefined }, midtoneDiff: Math.round(mid * 10) / 10, cameraSize: [bmp.width, bmp.height], png: patch.png ? await toPng(r) : undefined }
+}
+
+const asShot = (name) => tempTintFromMultipliers(photos[name].color.camXyz, photos[name].color.shotMul)
+
+/** 12 small renders of a photo (profiles, Auto, built-in presets) in one PNG, labelled in the console. */
+async function contactSheet(name) {
+  const { builtinPresets } = await import('/src/presets/catalog.ts')
+  const { applyPreset } = await import('/src/presets/apply.ts')
+  const p = photos[name]
+  const presets = builtinPresets()
+  const pick = [0, 25, 60, 95, 130, 170].map((i) => presets[i % presets.length])
+  engine.setSource(p.image, p.color)
+  const auto = engine.auto(recipeFor(name))
+  const recipes = [
+    ['default', recipeFor(name)], ['neutral', recipeFor(name, { profile: 'neutral' })], ['vivid', recipeFor(name, { profile: 'vivid' })],
+    ['flat', recipeFor(name, { profile: 'flat' })], ['mono', recipeFor(name, { profile: 'mono' })],
+    ['auto', recipeFor(name, { basic: { ...recipeFor(name).basic, ...auto.basic }, wb: { preset: 'auto', ...auto.wb } })],
+    ...pick.map((pr) => [pr.name, applyPreset(recipeFor(name), pr, 100, 'original', p.color.kind)]),
+  ]
+  const tw = 400, th = 267, sheet = new Uint8ClampedArray(tw * 4 * th * 3 * 4)
+  for (let k = 0; k < recipes.length; k++) {
+    const r = await engine.renderImage(recipes[k][1], p.image, p.color, { bitDepth: 8, colorSpace: 'srgb', maxLongEdge: tw, rasters })
+    const ox = (k % 4) * tw, oy = Math.floor(k / 4) * th
+    for (let y = 0; y < Math.min(th, r.height); y++) sheet.set(r.data.subarray(y * r.width * 4, (y * r.width + Math.min(tw, r.width)) * 4), ((oy + y) * tw * 4 + ox) * 4)
+  }
+  console.log('diffmap sheet: ' + recipes.map((r) => r[0]).join(' | ') + ' | auto=' + JSON.stringify(auto))
+  return toPng({ width: tw * 4, height: th * 3, data: sheet })
+}
+
+window.lab = { contactSheet, asShot, cameraCompare, beforeVisible, makeGrid, lineTest, autoCATest, defringeTest, hashes, vsPlain, setupRasters, denoiseCheck, removalCheck, developedSample, previewTiming, contextLoss, fullExport, regionCheck, canvasParity, healCheck, tilePng: async (i) => { const r = window.tilePair[i]; const d = new Uint8ClampedArray(r.data.length); for (let j = 0; j < d.length; j++) d[j] = r.data[j] >> 8; return toPng({ ...r, data: d }) }, loadJpeg, loadRaw, exportRender, jpegIdentity, exposureRatio, eyedropper, tiling, timing, canvasShot, supported: engine.supported }
 window.ready = true

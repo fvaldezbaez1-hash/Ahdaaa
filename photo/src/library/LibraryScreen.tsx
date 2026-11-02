@@ -23,6 +23,8 @@ import { PresetSheet } from './PresetSheet'
 import { useLibrary, type Library, type LibrarySheet } from './useLibrary'
 import { Welcome } from './Welcome'
 import { syncOnOpen } from '../sync/sync'
+import { RENDER_PIPELINE } from '../engine/version'
+import type { PhotoRecord } from '../io/types'
 import './library.css'
 
 const isString = (v: unknown) => typeof v === 'string'
@@ -44,7 +46,9 @@ export function LibraryScreen() {
   useEffect(() => syncOnOpen(), [])
   // Photos sync brought from another device get their thumbnails here if the app closed before they were made.
   useEffect(() => {
-    const missing = lib.photos?.filter((p) => p.thumbVersion === 0 && !thumbQueued.has(p.id)).map((p) => p.id) ?? []
+    // …and RAW thumbnails rendered by an older pipeline (see engine RENDER_PIPELINE) re-render lazily.
+    const stale = (p: PhotoRecord) => p.thumbVersion === 0 || (p.kind === 'raw' && (p.thumbPipeline ?? 1) < RENDER_PIPELINE)
+    const missing = lib.photos?.filter((p) => stale(p) && !thumbQueued.has(p.id)).map((p) => p.id) ?? []
     missing.forEach((id) => thumbQueued.add(id))
     if (missing.length) queueThumbnails(missing)
   }, [lib.photos])

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { detectFeatures, matchFeatures } from './features'
 import { apply3, homographyFrom, mul3, ransac, rng, rodrigues, transpose3, type M3 } from './geometry'
 import { alignToReference, ghostMasks, HdrAccumulator, unclipped } from './hdr'
-import { librawCurve, librawInverse } from './linearize'
+import { librawCurve, librawInverse } from '../io/raw/curve'
 import { blendTile, gainCompensation, largestRectangle, PanoMapper, planPanorama, type PanoPlan, type RenderSource } from './pano'
 
 /** A textured scene: random rectangles (corners for features) over a smooth gradient, as a function of (u, v). */

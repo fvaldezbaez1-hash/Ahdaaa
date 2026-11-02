@@ -82,6 +82,8 @@ async function decodeRaw(blob: Blob, req: DecodeRequest): Promise<DecodedPhoto> 
     if (librawUsable()) {
       try {
         r = await librawDecode(blob, { halfSize: half, maxLongEdge, signal })
+        // libraw-wasm applies LibRaw's BT.709 curve whatever we ask: undo it so the engine gets linear light.
+        r.data = (await work('linearizeRaw', { data: r.data }, [r.data.buffer], signal)).data
       } catch (e) {
         if (isAbort(e)) throw e
         if (!(e instanceof BackendUnavailable)) fileError = e as Error

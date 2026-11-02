@@ -23,6 +23,8 @@ import type { Engine, ExportRenderOptions, Histogram, RasterImage, RenderedImage
 
 export type { Engine } from './types'
 
+export { RENDER_PIPELINE } from './version'
+
 /** Guides kept per engine (each ≤ 512 px, a few MB). */
 const GUIDE_CACHE = 16
 

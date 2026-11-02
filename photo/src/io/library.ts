@@ -1,6 +1,7 @@
 // Library bookkeeping: import, recipe saves, thumbnails, deletion.
 import { defaultRecipe, isUnedited } from '../edit/defaults'
 import type { EditRecipe, Preset } from '../edit/types'
+import { RENDER_PIPELINE } from '../engine/version'
 import { applyPreset, findBuiltin } from '../presets/catalog'
 import { isAbort } from './abort'
 import { db, uid } from './db'
@@ -100,6 +101,7 @@ export async function importFiles(files: File[], opts: ImportOptions = {}): Prom
         edited: !isUnedited(recipe, d.kind, asShot),
         editedAt: undefined,
         thumbVersion: 1,
+        thumbPipeline: RENDER_PIPELINE,
         previewOnly: d.previewOnly || undefined,
         keywords: keywords.length ? keywords : undefined,
       })
@@ -145,7 +147,7 @@ async function renderThumb(id: string): Promise<void> {
     const cur = await db.photos.get(id)
     if (!cur) return // deleted meanwhile
     await db.thumbs.put({ id, ...thumb })
-    await db.photos.update(id, { thumbVersion: cur.thumbVersion + 1 })
+    await db.photos.update(id, { thumbVersion: cur.thumbVersion + 1, thumbPipeline: RENDER_PIPELINE })
   })
 }
 

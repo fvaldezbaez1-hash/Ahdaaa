@@ -35,10 +35,12 @@ const ok = (cond, label, detail) => console.log(`${cond ? 'PASS' : 'FAIL'} ${lab
 console.log('supported', await page.evaluate(() => window.lab.supported))
 const jpegList = ['photo-01.jpg', 'photo-03.jpg', 'photo-04.jpg', 'photo-05.jpg', 'photo-21.jpg']
 for (const j of jpegList) await lab('loadJpeg', j, '/jpeg/' + j)
-const needRaw = want('split') || want('lens') || want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
+const needRaw = args.includes('sheet') || want('camera') || want('split') || want('lens') || want('ai') || want('previews') || want('local') || want('region') || want('highlights') || want('eyedropper') || want('tiling') || want('timing') || want('renders') || want('look')
 if (needRaw) {
-  console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW')))
-  console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF')))
+  // --curved: decode like before the linearity fix (LibRaw's BT.709 curve left in), for before/after numbers.
+  const curved = args.includes('--curved')
+  console.log('arw', JSON.stringify(await lab('loadRaw', 'arw', '/sample/example-sony.ARW', { curved })))
+  console.log('nef', JSON.stringify(await lab('loadRaw', 'nef', '/sample/iss030e122639.NEF', { curved })))
 }
 
 if (want('identity'))
@@ -162,8 +164,10 @@ if (want('ai')) {
   save('ai-overlay', await lab('canvasShot', 'photo-21.jpg', { layers: [AI_SKY] }, { maskOverlay: 'aisky' }, 768, 512))
 }
 
-// Render hashes from the Phase 3 engine (SwiftShader): recipes without Phase 4 features must stay bit-identical.
-const PHASE3_HASHES = { arw: '285b1d96/c3c0de58', jpg: 'ac5a74f/9f2535ab', local: 'de0946e4/7e22bd6b', ai: '476d76a1/65291731', jpgEdit: '4a1197fb/5d376170' }
+// Render hashes (SwiftShader) of recipes without Phase 4 features. JPEG ones are from the Phase 3 engine (still
+// bit-identical); RAW ones were re-pinned after the RAW linearity fix (RENDER_PIPELINE 2).
+const RAW_HASHES = { arw: '4aa59f19/dfa66f32', local: '55167e8f/860389ef', ai: 'aceaeddc/73853b45' }
+const PHASE3_HASHES = { jpg: 'ac5a74f/9f2535ab', jpgEdit: '4a1197fb/5d376170', ...RAW_HASHES }
 
 // Phase 4: lens + perspective + levels + color editor, with a mask and a heal spot.
 const LENS = { enabled: true, profileId: 'test', vignetting: { k: [-0.35, 0.12, -0.02], amount: 100 }, tca: { r: [1.0004, 0, 0], b: [0.9996, 0, 0] }, autoCA: true,
@@ -178,7 +182,7 @@ const PHASE4 = { geometry: GEO4, lens: LENS, levels: LEVELS, colorEditor: [GREEN
 if (want('lens')) {
   await lab('setupRasters')
   const h = await lab('hashes', [['arw', 'arw', {}], ['jpg', 'photo-21.jpg', {}], ['local', 'arw', LOCAL], ['ai', 'arw', AI], ['jpgEdit', 'photo-21.jpg', { basic: { highlights: -60, shadows: 50, clarity: 30, vibrance: 30 } }]])
-  ok(Object.entries(PHASE3_HASHES).every(([k, v]) => h[k] === v), 'recipes without Phase 4 features render bit-identical to Phase 3 (export + canvas)', h)
+  ok(Object.entries(PHASE3_HASHES).every(([k, v]) => h[k] === v), 'recipes without Phase 4 features render bit-identical (JPEG: to Phase 3; RAW: pinned after the linearity fix)', h)
   const a = await lab('canvasParity', 'arw', PHASE4)
   ok(a.maxDiff <= 2, 'lens + perspective + levels + color editor + mask + heal: canvas (1:1) == export', a)
   const b = await lab('regionCheck', 'arw', PHASE4, 700, 500)
@@ -214,6 +218,28 @@ if (want('lens')) {
   await R('p4-skin-04', 'photo-04.jpg', { colorEditor: [{ id: 'k', name: 'Skin', enabled: true, hue: 22, sat: 40, hueWidth: 22, satLow: 10, satHigh: 85, smooth: 60, hueShift: 0, satShift: 0, lightShift: 0, uniformity: { hue: 70, sat: 50, light: 50 } }] })
 }
 
+if (want('camera')) {
+  // The default RAW render vs the camera's own JPEG (embedded preview), on linear data (see params RAW_BASELINE_EV).
+  const arw = await lab('cameraCompare', 'arw'), nef = await lab('cameraCompare', 'nef')
+  ok(arw.midtoneDiff <= 12 && Math.abs(arw.ours.mean - arw.camera.mean) <= 15 && Math.abs(arw.ours.p5 - arw.camera.p5) <= 8,
+    'default RAW render ≈ the camera JPEG (Sony ARW: luminance levels 0…255)', arw)
+  console.log('camera JPEG vs default render (Nikon NEF, night shot)', JSON.stringify(nef))
+  // As Shot white balance comes from the RAW's metadata: the same Kelvin / tint as before the linearity fix.
+  const shot = await page.evaluate(() => [window.lab.asShot('arw'), window.lab.asShot('nef')])
+  ok(Math.abs(shot[0].temp - 5350.48) < 0.1 && Math.abs(shot[1].temp - 5453.76) < 0.1, 'WB As Shot Kelvin unchanged', shot)
+  if (args.includes('--sweep'))
+    for (const ev of [0.5, 0.75, 1, 1.25, 1.5])
+      for (const n of ['arw', 'nef']) {
+        const r = await lab('cameraCompare', n, { basic: { exposure: ev } })
+        console.log('SWEEP', ev, n, r.midtoneDiff, JSON.stringify(r.ours))
+      }
+}
+
+if (args.includes('sheet')) {
+  // Profiles and a few built-in presets on the RAW: a contact sheet to look at.
+  save('raw-sheet', await lab('contactSheet', 'arw'))
+}
+
 if (want('split')) {
   const v = await lab('beforeVisible', 'arw', 1200, 800)
   const opaque = (h) => h.alpha === 255 && h.green > 10
@@ -242,7 +268,7 @@ if (want('renders') || want('look')) {
     save(file, r.png)
     console.log('render', file, JSON.stringify({ ...r, png: undefined }))
   }
-  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai', 'lens', 'split'].includes(a))
+  const only = args.filter((a) => !['renders', 'look', 'identity', 'exposure', 'eyedropper', 'highlights', 'tiling', 'timing', 'region', 'context', 'full', 'local', 'previews', 'ai', 'lens', 'split', 'camera', 'sheet'].includes(a))
   const R0 = R
   R = async (file, ...rest) => (only.length === 0 || only.some((o) => file.includes(o))) && R0(file, ...rest)
   await R('arw-default', 'arw', {})

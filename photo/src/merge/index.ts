@@ -12,7 +12,6 @@ import type { DecodedPhoto, PhotoRecord } from '../io/types'
 import { decodeStored } from '../io/working'
 import { MergeWorker } from './client'
 import { exifExposure, type Deghost } from './hdr'
-import { LIBRAW_OUTPUT_IS_CURVED } from './linearize'
 import type { HdrAnalysis } from './merge.worker'
 import type { PanoPlan, Projection } from './pano'
 
@@ -265,7 +264,7 @@ export async function runMerge(plan: MergePlan, opts: RunOptions = {}): Promise<
     const rec = (await db.photos.get(id))!
     // Open at the reference exposure's brightness. Lumen's RAW decode currently applies LibRaw's
     // BT.709 curve (see linearize.ts), so in its terms a stop of BaselineExposure is ≈ 0.45 stop.
-    const ev = Math.max(-5, Math.min(5, Math.round(result.baselineExposure * (LIBRAW_OUTPUT_IS_CURVED ? 0.45 : 1) * 100) / 100))
+    const ev = Math.max(-5, Math.min(5, Math.round(result.baselineExposure * 100) / 100))
     await db.photos.update(id, { merged: { kind: plan.kind, sources: [...plan.ids], at: Date.now() } })
     if (ev) await saveRecipe(id, { ...rec.recipe, basic: { ...rec.recipe.basic, exposure: ev } })
     await refreshThumbnail(id).catch(() => undefined)

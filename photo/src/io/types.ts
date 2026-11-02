@@ -52,6 +52,8 @@ export interface PhotoRecord {
   editedAt?: number
   /** Bumped whenever the thumbnail is re-rendered. */
   thumbVersion: number
+  /** engine RENDER_PIPELINE the thumbnail was rendered with (absent = 1); older RAW thumbnails re-render. */
+  thumbPipeline?: number
   /**
    * RAW file shown through the camera's embedded JPEG preview because no RAW
    * decoder could develop it (kind is then 'display'). Re-decode when one can.

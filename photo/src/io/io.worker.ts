@@ -14,6 +14,7 @@ import { displayP3Profile } from './encode/icc'
 import { encodeJpeg } from './encode/jpeg'
 import { encodePng } from './encode/png'
 import { encodeTiff16 } from './encode/tiff'
+import { linearizeLibraw } from './raw/curve'
 import { findEmbeddedJpeg, stripApp1 } from './raw/embedded'
 import type { ExportFormat, PhotoMeta } from './types'
 
@@ -72,6 +73,10 @@ const handlers = {
     return readKeywords(a.blob)
   },
 
+  /** LibRaw's output → linear camera RGB (see raw/curve.ts), off the UI thread. */
+  async linearizeRaw(a: { data: Uint16Array }): Promise<{ data: Uint16Array }> {
+    return { data: linearizeLibraw(a.data) }
+  },
   async resample(a: { image: SourceImage; maxLongEdge?: number }): Promise<SourceImage> {
     return resampleRgb16(a.image.data, a.image.width, a.image.height, a.maxLongEdge)
   },
