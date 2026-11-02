@@ -57,6 +57,13 @@ export interface PhotoRecord {
    * decoder could develop it (kind is then 'display'). Re-decode when one can.
    */
   previewOnly?: boolean
+  /** Phase 5: keywords (tags), unique ignoring case, in the order added. */
+  keywords?: string[]
+  /**
+   * Phase 5: made by merging other photos (HDR or panorama). Its original is a linear DNG that
+   * Lumen wrote, so it decodes and edits like any RAW. `sources` are the merged photos' ids.
+   */
+  merged?: { kind: 'hdr' | 'pano'; sources: string[]; at: number }
 }
 
 export interface OriginalRecord {
