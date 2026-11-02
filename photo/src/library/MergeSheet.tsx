@@ -38,10 +38,10 @@ const PROJECTION_NAME: Record<Projection, string> = { perspective: 'perspective'
 export function MergeSheet({ ids, onClose }: { ids: string[]; onClose: () => void }) {
   const photos = useLiveQuery(() => db.photos.bulkGet(ids).then((ps) => ps.filter((p): p is PhotoRecord => !!p)), [ids.join('\n')])
   const [mod, setMod] = useState<MergeModule | null>(null)
-  const [kind, setKind] = useState<MergeKind | null>(null)
+  const [picked, setKind] = useState<MergeKind | null>(null)
   const [options, setOptions] = useState<MergeOptions | null>(null)
-  const [plan, setPlan] = useState<MergePlan | null>(null)
-  const [planning, setPlanning] = useState<Progress | null>(null)
+  /** The latest preview request, by key: its progress, then its plan or error. */
+  const [planned, setPlanned] = useState<{ key: string; progress?: Progress; plan?: MergePlan; error?: string } | null>(null)
   const [running, setRunning] = useState<Progress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const runAbort = useRef<AbortController | null>(null)
@@ -58,45 +58,29 @@ export function MergeSheet({ ids, onClose }: { ids: string[]; onClose: () => voi
     }
   }, [])
 
-  // Suggest HDR or panorama once the photos and the merge code are in.
-  useEffect(() => {
-    if (!mod || !photos || kind) return
-    setKind(mod.suggestKind(photos))
-    setOptions({ ...mod.DEFAULT_MERGE_OPTIONS })
-  }, [mod, photos, kind])
-
+  // HDR or panorama: what the person picked, else what the photos look like.
+  const kind = picked ?? (mod && photos?.length ? mod.suggestKind(photos) : null)
+  const opts = options ?? mod?.DEFAULT_MERGE_OPTIONS ?? null
   const why = mod && photos && kind ? mod.cantMerge(photos, kind) : null
-  // Only the options of the chosen kind change its preview.
-  const planKey = !options || !kind ? '' : kind === 'hdr' ? `hdr ${options.deghost}` : `pano ${options.projection} ${options.autoCrop}`
+  // Everything the preview depends on; a new key replans (and cancels the previous plan).
+  const key = mod && photos?.length && kind && opts && !why ? JSON.stringify({ ids: photos.map((p) => p.id), kind, opts }) : ''
 
   useEffect(() => {
-    if (!mod || !kind || !options || !photos?.length || why) return
+    if (!mod || !key) return
+    const req = JSON.parse(key) as { ids: string[]; kind: MergeKind; opts: MergeOptions }
     const ac = new AbortController()
-    setPlan(null)
-    setError(null)
-    setPlanning({ fraction: 0, stage: 'Reading the photos…' })
-    mod
-      .planMerge(
-        photos.map((p) => p.id),
-        kind,
-        options,
-        { signal: ac.signal, onProgress: (fraction, stage) => !ac.signal.aborted && setPlanning({ fraction, stage }) },
-      )
-      .then(
-        (p) => {
-          if (ac.signal.aborted) return
-          setPlan(p)
-          setPlanning(null)
-        },
-        (e) => {
-          if (ac.signal.aborted || isAbort(e)) return
-          setError(errorMessage(e))
-          setPlanning(null)
-        },
-      )
+    const onProgress = (fraction: number, stage: string) => !ac.signal.aborted && setPlanned({ key, progress: { fraction, stage } })
+    mod.planMerge(req.ids, req.kind, req.opts, { signal: ac.signal, onProgress }).then(
+      (plan) => !ac.signal.aborted && setPlanned({ key, plan }),
+      (e) => !ac.signal.aborted && !isAbort(e) && setPlanned({ key, error: errorMessage(e) }),
+    )
     return () => ac.abort()
-    // planKey stands for the options that matter, and photos for their ids (the live query re-emits).
-  }, [mod, planKey, photos?.map((p) => p.id).join('\n'), why])
+  }, [mod, key])
+
+  const current = key && planned?.key === key ? planned : null
+  const plan = current?.plan ?? null
+  const planning = key && !current?.plan && !current?.error ? (current?.progress ?? { fraction: 0, stage: 'Reading the photos…' }) : null
+  const problem = why ?? current?.error
 
   const merge = () => {
     if (!mod || !plan) return
@@ -124,7 +108,7 @@ export function MergeSheet({ ids, onClose }: { ids: string[]; onClose: () => voi
     onClose()
   }
 
-  const set = (patch: Partial<MergeOptions>) => setOptions((o) => (o ? { ...o, ...patch } : o))
+  const set = (patch: Partial<MergeOptions>) => opts && setOptions({ ...opts, ...patch })
   const busy = !!running
 
   let footer: React.ReactNode
@@ -163,7 +147,7 @@ export function MergeSheet({ ids, onClose }: { ids: string[]; onClose: () => voi
 
   return (
     <Sheet title={kind === 'pano' ? 'Panorama' : kind === 'hdr' ? 'HDR merge' : 'Merge'} onClose={close} footer={footer} wide>
-      {!mod || !photos || !kind || !options ? (
+      {!mod || !photos || !kind || !opts ? (
         error ? <p className="merge-error">{error}</p> : <Spinner />
       ) : (
         <div className="stack loose merge-sheet">
@@ -187,17 +171,19 @@ export function MergeSheet({ ids, onClose }: { ids: string[]; onClose: () => voi
           />
 
           <div className="merge-preview" aria-busy={!!planning}>
-            {plan && !why && <PreviewCanvas plan={plan} />}
+            {plan && <PreviewCanvas plan={plan} />}
             {planning && (
               <div className="merge-preview-status">
                 <Spinner label={planning.stage} />
                 <span className="small">{planning.stage}</span>
               </div>
             )}
-            {(why || (error && !planning)) && <p className="merge-error">{why ?? error}</p>}
+            {problem && !planning && <p className="merge-error">{problem}</p>}
           </div>
 
-          {plan && !planning && !why && (
+          {error && <p className="merge-error">{error}</p>}
+
+          {plan && (
             <div className="merge-facts muted small">
               {plan.kind === 'hdr' && plan.stops !== undefined && <span>About {plan.stops.toFixed(1)} stops of dynamic range</span>}
               {plan.kind === 'pano' && plan.span && (
@@ -217,7 +203,7 @@ export function MergeSheet({ ids, onClose }: { ids: string[]; onClose: () => voi
                 <b>Deghost</b>
                 <small>Removes things that moved between brackets</small>
               </div>
-              <Segmented<Deghost> label="Deghost" value={options.deghost} onChange={(v) => !busy && set({ deghost: v })} options={DEGHOST} />
+              <Segmented<Deghost> label="Deghost" value={opts.deghost} onChange={(v) => !busy && set({ deghost: v })} options={DEGHOST} />
             </div>
           ) : (
             <>
@@ -225,14 +211,14 @@ export function MergeSheet({ ids, onClose }: { ids: string[]; onClose: () => voi
                 <div className="lbl">
                   <b>Projection</b>
                 </div>
-                <Segmented<Projection | 'auto'> label="Projection" value={options.projection} onChange={(v) => !busy && set({ projection: v })} options={PROJECTIONS} />
+                <Segmented<Projection | 'auto'> label="Projection" value={opts.projection} onChange={(v) => !busy && set({ projection: v })} options={PROJECTIONS} />
               </div>
               <div className="setting-row">
                 <div className="lbl">
                   <b>Auto crop</b>
                   <small>Crops away the empty edges</small>
                 </div>
-                <Toggle label="Auto crop" checked={options.autoCrop} onChange={(v) => !busy && set({ autoCrop: v })} />
+                <Toggle label="Auto crop" checked={opts.autoCrop} onChange={(v) => !busy && set({ autoCrop: v })} />
               </div>
             </>
           )}

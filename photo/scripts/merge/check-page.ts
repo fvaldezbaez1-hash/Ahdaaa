@@ -288,7 +288,10 @@ window.runCheck = async (plan) => {
           }
         const cv = new OffscreenCanvas(cw, ch)
         cv.getContext('2d')!.putImageData(new ImageData(rgba, cw, ch), 0, 0)
-        files.push(new File([await cv.convertToBlob({ type: 'image/jpeg', quality: 0.92 })], `crop${n}.jpg`))
+        const jpeg = await cv.convertToBlob({ type: 'image/jpeg', quality: 0.92 })
+        files.push(new File([jpeg], `crop${n}.jpg`))
+        // The UI step of check.mjs imports these into the app.
+        await window.saveOutput(`pano-crop${n}.jpg`, await b64(jpeg))
       }
       const imp = await importFiles(files)
       if (imp.added.length !== 4) throw new Error(`imported ${imp.added.length}`)

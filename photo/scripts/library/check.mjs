@@ -436,7 +436,7 @@ async function desktop() {
   const [download] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }).catch(() => null), page.locator('.set-card button', { hasText: 'Back up' }).click()])
   check(!!download && /lumen-edits-\d{4}-\d\d-\d\d\.json/.test(download.suggestedFilename()), 'Back up edits downloads a JSON file')
   if (download) {
-    await page.locator('.set-card input[type="file"]').setInputFiles(await download.path())
+    await page.locator('#set-storage .set-card input[type="file"]').setInputFiles(await download.path())
     check(await toastStarting(page, 'Restored edits on'), `Restore edits reads the backup (${await toastText(page)})`)
   }
   await page.evaluate(() => (document.querySelector('.settings').style.height = 'auto'))
@@ -686,7 +686,8 @@ async function workflow() {
   // One photo in the info panel: a partial keyword list, autocomplete.
   await tile(page, 5).locator('.tile-media').click()
   const info = page.locator('.lib-info .kw-input')
-  if (!(await info.isVisible())) await page.locator('button[aria-label="Photo info panel"]').click()
+  const toggle = page.locator('button[aria-label="Photo info panel"]')
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
   await info.click()
   await page.keyboard.type('Be')
   await page.waitForSelector('.kw-suggest li')
