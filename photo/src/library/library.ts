@@ -387,3 +387,19 @@ export function importSummary(added: number, skipped: readonly { reason: string 
   if (ignored) parts.push(`${plural(ignored, 'other file')} ignored`)
   return parts.join(' · ')
 }
+
+/** Survey: columns for `n` 3:2 cells in a W × H area (each with an `extraH` bar under it), as large as they can be. */
+export function surveyColumns(n: number, W: number, H: number, gap = 10, aspect = 1.5, extraH = 40): number {
+  let best = 1, bestSize = 0
+  for (let cols = 1; cols <= Math.max(1, n); cols++) {
+    const rows = Math.ceil(n / cols)
+    const cw = (W - gap * (cols - 1)) / cols
+    const ch = (H - gap * (rows - 1)) / rows - extraH
+    const size = Math.min(cw, ch * aspect)
+    if (size > bestSize) {
+      bestSize = size
+      best = cols
+    }
+  }
+  return best
+}

@@ -8,7 +8,7 @@ import { countKeywords, normalizeKeyword, parseKeywords, sharedKeywords, suggest
 import './keywords.css'
 
 /** Every keyword in the library with its count, from the keywords index (no photo records loaded). */
-export function useKnownKeywords(): KeywordCount[] {
+function useKnownKeywords(): KeywordCount[] {
   return (
     useLiveQuery(async () => {
       const keys = (await db.photos.orderBy('keywords').keys()) as string[]

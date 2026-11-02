@@ -54,6 +54,11 @@ export function Stage({ pad }: { pad: number }) {
   const zoom = useView((s) => s.zoom)
   const denoised = useEditor((s) => (s.recipe?.denoise?.amount ?? 0) > 0)
   const [notice, setNotice] = useState(session.photo.notice)
+  const side = mode === 'side' && tool !== 'crop'
+  const beforeRef = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    sv.current?.setBefore(side ? beforeRef.current : null)
+  }, [side, session])
 
   useEffect(() => {
     const stage = stageRef.current!, photo = photoRef.current!
@@ -201,7 +206,7 @@ export function Stage({ pad }: { pad: number }) {
     st.panning = false
   }
 
-  const cls = ['ed-stage', (eyedropper || pick) && 'picking', zoom !== 1 && 'zoomed', tool === 'crop' && 'cropping', photoTool(tool) && `tool-${tool}`].filter(Boolean).join(' ')
+  const cls = ['ed-stage', (eyedropper || pick) && 'picking', zoom !== 1 && 'zoomed', tool === 'crop' && 'cropping', photoTool(tool) && `tool-${tool}`, side && 'side'].filter(Boolean).join(' ')
   return (
     <div
       ref={stageRef}
@@ -213,11 +218,23 @@ export function Stage({ pad }: { pad: number }) {
       onPointerLeave={() => toolBus.get()?.hover(null)}
       onDoubleClick={(e) => !view.get().tool && !view.get().eyedropper && sv.current?.toggleZoom(local(e).x, local(e).y)}
     >
+      {side && (
+        <div className="ed-before-clip">
+          <canvas ref={beforeRef} className="ed-before-pane" aria-label="The original" role="img" />
+        </div>
+      )}
+      {side && (
+        <>
+          <span className="ed-badge ed-side-label before">Before</span>
+          <span className="ed-badge ed-side-label after">After</span>
+          <span className="ed-side-divider" aria-hidden="true" />
+        </>
+      )}
       <div ref={photoRef} className="ed-photo">
         {tool === 'crop' ? <CropOverlay /> : tool === 'guides' ? <GuidesOverlay /> : photoTool(tool) ? <ToolOverlay /> : <CompareOverlay />}
         {(grid || tool === 'guides') && <div className="ed-grid" aria-hidden="true" />}
       </div>
-      {(holding || mode === 'before') && !tool && <span className="ed-badge">Original</span>}
+      {(holding || mode === 'before') && !tool && !side && <span className="ed-badge">Original</span>}
       {denoised && !holding && mode !== 'before' && (
         <span className="ed-badge ed-badge-ai">
           <Icon name="sparkle" size={11} /> AI denoised

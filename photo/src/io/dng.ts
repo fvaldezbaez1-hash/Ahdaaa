@@ -167,14 +167,11 @@ export class DngWriter {
   private pending: Uint16Array
   private pendingRows = 0
   private rows = 0
-  private readonly previewBytes: number
 
   constructor(info: DngInfo) {
-    this.info = info
+    this.info = { ...info }
     this.rowsPerStrip = Math.max(1, Math.min(info.height, Math.floor((1 << 20) / (info.width * 6))))
     this.pending = new Uint16Array(this.rowsPerStrip * info.width * 3)
-    this.previewBytes = info.preview ? info.preview.jpeg.length + (info.preview.jpeg.length & 1) : 0
-    if (info.preview) this.parts.push(info.preview.jpeg as Uint8Array<ArrayBuffer>, new Uint8Array(info.preview.jpeg.length & 1))
   }
 
   /** Append rows (interleaved RGB, width × rows × 3 values). */
@@ -202,11 +199,14 @@ export class DngWriter {
     this.pendingRows = 0
   }
 
-  finish(): Blob {
+  /** Finish the file; a preview (e.g. made from the rows just written) may be given here instead of up front. */
+  finish(preview?: DngInfo['preview']): Blob {
     this.flush()
+    if (preview) this.info.preview = preview
     const i = this.info
     if (this.rows !== i.height) throw new Error(`DNG has ${this.rows} rows, expected ${i.height}`)
-    const dataStart = 8 + this.previewBytes
+    const previewBytes = i.preview ? i.preview.jpeg.length + (i.preview.jpeg.length & 1) : 0
+    const dataStart = 8 + previewBytes
     let at = dataStart
     const offsets = this.stripBytes.map((n) => {
       const o = at
@@ -281,7 +281,8 @@ export class DngWriter {
     const hv = new DataView(header.buffer)
     header.set([0x49, 0x49, 42, 0])
     hv.setUint32(4, ifdAt, true)
-    return new Blob([header, ...this.parts, ifds as Uint8Array<ArrayBuffer>], { type: 'image/x-adobe-dng' })
+    const pre: BlobPart[] = i.preview ? [i.preview.jpeg as Uint8Array<ArrayBuffer>, new Uint8Array(i.preview.jpeg.length & 1)] : []
+    return new Blob([header, ...pre, ...this.parts, ifds as Uint8Array<ArrayBuffer>], { type: 'image/x-adobe-dng' })
   }
 }
 

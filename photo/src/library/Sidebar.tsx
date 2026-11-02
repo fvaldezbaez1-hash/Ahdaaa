@@ -4,6 +4,8 @@ import { SearchBox } from '../ui/controls'
 import { SMART_VIEWS, formatBytes, plural } from './library'
 import type { Library, LibrarySheet } from './useLibrary'
 import { useStorageInfo } from './useStorageInfo'
+import { syncNow, useSyncStatus } from '../sync/sync'
+import { link } from '../router'
 
 export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s: LibrarySheet) => void; onImportFolder: () => void }) {
   const { counts, view, setView } = lib
@@ -79,6 +81,7 @@ export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s:
         })}
       </nav>
 
+      <SyncChip />
       <div className="lib-storage">
         <div className="bold" style={{ marginBottom: 4 }}>
           Stored on this device
@@ -101,5 +104,34 @@ export function Sidebar({ lib, open, onImportFolder }: { lib: Library; open: (s:
         )}
       </div>
     </aside>
+  )
+}
+
+/** Sync in progress, or needing a click to go on (permission for the folder lapses between visits). */
+function SyncChip() {
+  const s = useSyncStatus()
+  if (s.state === 'idle') return null
+  if (s.state === 'running')
+    return (
+      <div className="lib-sync" role="status">
+        <Icon name="sync" size={15} className="spin" />
+        <span className="ellipsis">{s.step ?? 'Syncing…'}</span>
+      </div>
+    )
+  if (s.state === 'done')
+    return (
+      <a className="lib-sync done" href={link('/settings')} title={s.message}>
+        <Icon name="check" size={15} />
+        <span className="ellipsis">Synced · {s.message}</span>
+      </a>
+    )
+  return (
+    <div className="lib-sync warn" role="status">
+      <Icon name="sync" size={15} />
+      <span className="grow small">{s.state === 'error' ? `Sync failed: ${s.message}` : 'Sync is paused until you allow the folder again.'}</span>
+      <button type="button" className="btn outline sm" onClick={() => void syncNow(true)}>
+        {s.state === 'error' ? 'Retry' : 'Allow'}
+      </button>
+    </div>
   )
 }

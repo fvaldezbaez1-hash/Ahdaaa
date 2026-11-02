@@ -1,7 +1,8 @@
 // Export file names from a template: "{name}-web", "{date}_{seq}", "Wedding {seq}".
 // Tokens are replaced per photo; anything else is kept as typed. Pure, so the
 // export sheet's live example and the exporter agree (and it's unit-tested).
-import type { PhotoRecord } from '../io/types'
+import type { ExportOptions, PhotoRecord } from '../io/types'
+import { FORMATS } from './exportMath'
 import { formatCamera } from './library'
 
 export const DEFAULT_TEMPLATE = '{name}-lumen'
@@ -30,6 +31,7 @@ const pad = (n: number, w = 2) => String(n).padStart(w, '0')
 /** Characters no file system accepts (and control characters) become "-"; no leading/trailing dots or spaces. */
 export function sanitizeFileName(s: string): string {
   return s
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what goes
     .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]+/g, '-')
     .replace(/\s+/g, ' ')
     .replace(/-{2,}/g, '-')
@@ -59,3 +61,7 @@ export function renderFileName(template: string, p: Named, ctx: NameContext): st
 
 /** Unknown tokens in a template (shown as a hint; they're kept literally). */
 export const unknownTokens = (template: string) => [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[0]).filter((t) => !TOKENS.some((k) => k.token === t.toLowerCase()))
+
+/** The whole file name a photo gets with these export settings (before any "-2" for clashes). */
+export const fileNameFor = (p: Named, o: Pick<ExportOptions, 'format' | 'fileName'>, seq = 1, total = 1) =>
+  `${renderFileName(o.fileName || DEFAULT_TEMPLATE, p, { seq, total })}.${FORMATS.find((f) => f.value === o.format)?.ext ?? 'jpg'}`

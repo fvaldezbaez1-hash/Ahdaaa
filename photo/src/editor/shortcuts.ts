@@ -18,6 +18,7 @@ export const SHORTCUTS: { keys: string; action: string }[] = [
   { keys: '⇧⌘Z / Ctrl+Y', action: 'Redo' },
   { keys: '\\', action: 'Show the original (toggle)' },
   { keys: 'Y', action: 'Split before | after' },
+  { keys: '⇧Y', action: 'Before and after side by side' },
   { keys: 'C', action: 'Crop & straighten' },
   { keys: '[ / ]', action: 'Rotate left / right 90° (brush or spot size while masking or healing)' },
   { keys: 'Enter / Esc', action: 'Apply / cancel the crop; leave masking, healing or Guided Upright; cancel a color picker' },
@@ -105,6 +106,7 @@ export function useEditorShortcuts(session: Session | null, order: StripItem[] |
           return run(() => view.set({ mode: v.mode === 'before' ? 'after' : 'before' }))
         case 'y':
         case 'Y':
+          if (e.shiftKey) return run(() => view.set({ mode: v.mode === 'side' ? 'after' : 'side' }))
           return run(() => view.set({ mode: v.mode === 'split' ? 'after' : 'split' }))
         case 'c':
         case 'C':

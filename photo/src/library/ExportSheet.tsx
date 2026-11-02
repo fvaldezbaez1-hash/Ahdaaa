@@ -12,9 +12,9 @@ import { Spinner } from '../ui/controls'
 import { toast } from '../ui/toast'
 import { errorMessage } from './actions'
 import { ExportFields } from './ExportFields'
-import { estimateBytes, FORMATS, outputSize } from './exportMath'
+import { estimateBytes, outputSize } from './exportMath'
 import { allPresets, presetNamed, presetSummary, sameOptions, savePreset, type ExportPreset } from './exportPresets'
-import { DEFAULT_TEMPLATE, renderFileName } from './fileNames'
+import { DEFAULT_TEMPLATE, fileNameFor, renderFileName } from './fileNames'
 import { formatBytes, formatDimensions, plural } from './library'
 import './sheets.css'
 
@@ -30,9 +30,6 @@ type Failure = { name: string; reason: string }
 
 const isAbort = (e: unknown) => (e as { name?: string } | null)?.name === 'AbortError'
 
-const extOf = (o: ExportOptions) => FORMATS.find((f) => f.value === o.format)?.ext ?? 'jpg'
-/** The file name a photo gets with these settings (no number suffix for clashes). */
-export const fileNameFor = (p: PhotoRecord, o: ExportOptions, seq = 1, total = 1) => `${renderFileName(o.fileName || DEFAULT_TEMPLATE, p, { seq, total })}.${extOf(o)}`
 
 const variantOf = (o: ExportOptions, total: number, label?: string): ExportVariant => ({ opts: o, label, name: (p, i) => renderFileName(o.fileName || DEFAULT_TEMPLATE, p, { seq: i + 1, total }) })
 

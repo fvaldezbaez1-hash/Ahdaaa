@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { MenuSheet, Sheet, type MenuItem } from '../ui/Sheet'
 import { Spinner } from '../ui/controls'
 import { useIsPhone } from '../ui/hooks'
@@ -12,6 +12,7 @@ import { useDropImport } from './drop'
 import { ExportSheet } from './ExportSheet'
 import { ImportSheet } from './ImportSheet'
 import { KeywordEditor } from './KeywordEditor'
+import { LoupeView } from './Loupe'
 import { importer, useImport } from './importer'
 import { EMPTY_SELECTION, plural } from './library'
 import { PhoneLibrary } from './PhoneLibrary'
@@ -20,6 +21,7 @@ import { usePref } from './prefs'
 import { PresetSheet } from './PresetSheet'
 import { useLibrary, type Library, type LibrarySheet } from './useLibrary'
 import { Welcome } from './Welcome'
+import { syncOnOpen } from '../sync/sync'
 import './library.css'
 
 const isString = (v: unknown) => typeof v === 'string'
@@ -35,6 +37,9 @@ export function LibraryScreen() {
   const startImport = (files: File[]) => void importer.start(files, importPreset || undefined)
   const dragging = useDropImport(startImport)
   const close = useCallback(() => setSheet(null), [])
+
+  // Bring in what other devices changed (sync folder set up and still allowed; otherwise nothing happens).
+  useEffect(() => syncOnOpen(), [])
 
   useLayoutEffect(() => {
     // Not a React prop: lets the picker choose a whole folder (desktop browsers).
@@ -63,6 +68,7 @@ export function LibraryScreen() {
   return (
     <>
       {screen}
+      {lib.loupe && <LoupeView lib={lib} />}
       <input ref={filesInput} type="file" multiple accept={ACCEPT} hidden onChange={onPicked} />
       <input ref={folderInput} type="file" multiple hidden onChange={onPicked} />
       {dragging && (

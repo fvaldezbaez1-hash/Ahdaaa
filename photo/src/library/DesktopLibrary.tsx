@@ -73,7 +73,7 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
   }
 
   const onKey = useEffectEvent((e: KeyboardEvent) => {
-    if (e.defaultPrevented || isTyping(e) || document.querySelector('.sheet-backdrop')) return
+    if (e.defaultPrevented || isTyping(e) || document.querySelector('.sheet-backdrop') || lib.loupe) return
     const cmd = keyCommand(e, isApple)
     if (!cmd) return
     const t = e.target as HTMLElement
@@ -103,6 +103,16 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
         if (window.getSelection()?.toString() || !lib.focused) return
         e.preventDefault()
         void copyEdits(lib.focused)
+        return
+      case 'compare':
+        if (!order.length) return
+        e.preventDefault()
+        lib.openCompare(targets.length >= 2 ? targets : lib.focused ? [lib.focused.id] : [])
+        return
+      case 'survey':
+        if (targets.length < 2) return
+        e.preventDefault()
+        lib.openSurvey(targets)
         return
     }
     if (!targets.length) return
@@ -183,6 +193,26 @@ export function DesktopLibrary({ lib, open, onImportFolder }: { lib: Library; op
             <span className="sr-only">Thumbnail size</span>
             <input type="range" className="range" min={120} max={360} step={10} value={size} onChange={(e) => setSize(Number(e.target.value))} />
           </label>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Compare"
+            title={selected.length >= 2 ? 'Compare the selected photos (C)' : 'Compare with the next photo (C)'}
+            disabled={!order.length}
+            onClick={() => lib.openCompare(selected.length >= 2 ? selected : lib.focused ? [lib.focused.id] : [])}
+          >
+            <Icon name="compare" />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Survey"
+            title="Survey the selected photos (N)"
+            disabled={selected.length < 2}
+            onClick={() => lib.openSurvey(selected)}
+          >
+            <Icon name="survey" />
+          </button>
           <button
             type="button"
             className={infoOpen ? 'icon-btn on' : 'icon-btn'}

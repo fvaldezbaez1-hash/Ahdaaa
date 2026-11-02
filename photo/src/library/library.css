@@ -793,3 +793,225 @@
   color: var(--text-3);
   background: var(--panel-2);
 }
+
+/* ---------- Sync status (Phase 5) ---------- */
+.lib-sync {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12px;
+  text-decoration: none;
+  min-width: 0;
+}
+.lib-sync.done {
+  color: var(--text-3);
+}
+.lib-sync.warn {
+  flex-wrap: wrap;
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.lib-sync .spin {
+  animation: lib-spin 1.2s linear infinite;
+}
+@keyframes lib-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lib-sync .spin {
+    animation: none;
+  }
+}
+
+/* ---------- Compare & Survey (Phase 5) ---------- */
+.loupe {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--stage);
+  color: var(--text);
+}
+.loupe-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: calc(8px + var(--safe-top)) 14px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.loupe-bar h2 {
+  display: inline;
+  margin-right: 10px;
+  font-size: 15px;
+}
+.loupe-hint {
+  flex: none;
+  margin: 0;
+  padding: 6px 14px calc(8px + var(--safe-bottom));
+  text-align: center;
+}
+.cmp-panes {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  background: var(--line);
+}
+.loupe.phone .cmp-panes {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.cmp-pane {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--stage);
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+.cmp-pane.on {
+  outline-color: var(--accent);
+}
+.cmp-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  cursor: zoom-in;
+}
+.cmp-view.zoomed {
+  cursor: grab;
+}
+.cmp-img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.cmp-img > img,
+.cmp-img > span {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+.cmp-label {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+.cmp-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+}
+.cmp-nav.prev {
+  left: 8px;
+}
+.cmp-nav.next {
+  right: 8px;
+}
+.loupe-rate {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+.loupe-flag {
+  width: 32px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--text-3);
+}
+.loupe-flag:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.loupe-flag.on {
+  color: var(--accent);
+}
+.loupe-flag.reject.on {
+  color: var(--danger);
+}
+.survey-area {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+.survey-grid {
+  display: grid;
+  gap: 10px;
+  height: 100%;
+  grid-auto-rows: minmax(0, 1fr);
+}
+.loupe.phone .survey-grid {
+  height: auto;
+  grid-auto-rows: auto;
+}
+.survey-cell {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--tile);
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+}
+.survey-cell.on {
+  outline-color: var(--accent);
+}
+.survey-img {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 6px;
+}
+.loupe.phone .survey-img {
+  aspect-ratio: 1;
+}
+.survey-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+.loupe.phone .loupe-rate .lbl,
+.loupe.phone .loupe-rate [role='group'] button {
+  width: 22px;
+}

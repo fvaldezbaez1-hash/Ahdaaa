@@ -9,6 +9,7 @@ export const MAX_KEYWORD = 64
 /** Tidy one keyword: no surrounding or doubled spaces, no separators or control characters. '' if nothing is left. */
 export function normalizeKeyword(raw: string): string {
   return raw
+    // eslint-disable-next-line no-control-regex -- control characters are exactly what goes
     .replace(/[\u0000-\u001f\u007f,;|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
