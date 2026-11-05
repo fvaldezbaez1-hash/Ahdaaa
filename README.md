@@ -10,6 +10,8 @@ phone. No root, no account, no subscription, nothing leaves your phone.
 > - [Lumen](photo/README.md), a pro photo editor (RAW from 1,000+ cameras,
 >   100 presets, full-resolution export) for iPhone, iPad, Android, Mac and
 >   Windows.
+> - [AA Macro](aa-macro/README.md), a self-learning macro app for the Roblox
+>   game Anime Adventures (Windows and Mac).
 
 ---
 
