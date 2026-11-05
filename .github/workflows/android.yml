@@ -8,6 +8,8 @@ on:
       - '.github/workflows/fitness.yml'
       - '.github/workflows/photo.yml'
       - '.github/workflows/pages.yml'
+      - 'aa-macro/**'
+      - '.github/workflows/aa-macro.yml'
   pull_request:
     paths-ignore:
       - 'fitness/**'
@@ -15,6 +17,8 @@ on:
       - '.github/workflows/fitness.yml'
       - '.github/workflows/photo.yml'
       - '.github/workflows/pages.yml'
+      - 'aa-macro/**'
+      - '.github/workflows/aa-macro.yml'
   workflow_dispatch:
 
 permissions:

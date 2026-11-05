@@ -1,0 +1,120 @@
+name: AA Macro
+
+# Tests the Anime Adventures macro on Windows, macOS and Linux, then builds
+# the Windows and Mac apps. On the main branch the apps are also published to
+# the "aa-macro" release, so they have permanent download links.
+
+on:
+  push:
+    paths:
+      - 'aa-macro/**'
+      - '.github/workflows/aa-macro.yml'
+  pull_request:
+    paths:
+      - 'aa-macro/**'
+      - '.github/workflows/aa-macro.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: aa-macro-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: AAMacro-Windows
+          - os: macos-latest
+            artifact: AAMacro-Mac
+          - os: ubuntu-latest
+            artifact: ''
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: aa-macro
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: aa-macro/requirements*.txt
+
+      - name: Install
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Self-test (from source)
+        run: python -m aamacro --selftest
+
+      - name: GUI smoke test
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q xvfb
+          xvfb-run -a python -m aamacro --gui-smoke 2
+
+      - name: Build app
+        if: matrix.artifact != ''
+        run: python build_app.py
+
+      - name: Self-test the built app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\AA Macro\AA Macro.exe" -ArgumentList "--selftest","--selftest-out","selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          exit $p.ExitCode
+
+      - name: Self-test the built app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          "dist/AA Macro.app/Contents/MacOS/AA Macro" --selftest --selftest-out selftest.txt || { cat selftest.txt; exit 1; }
+          cat selftest.txt
+
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist\AA Macro" -DestinationPath "..\${{ matrix.artifact }}.zip"
+
+      - name: Zip (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent "dist/AA Macro.app" "../${{ matrix.artifact }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.artifact != ''
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      # A fixed tag keeps the download links permanent; make_latest is off so
+      # the repo's "latest release" stays AdShield.
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: aa-macro
+          name: AA Macro (Anime Adventures)
+          make_latest: false
+          files: out/*.zip
+          body: |
+            **Windows:** download `AAMacro-Windows.zip`, unzip it, open the `AA Macro` folder and run `AA Macro.exe`.
+            **Mac (Apple Silicon):** download `AAMacro-Mac.zip`, unzip it, then right-click `AA Macro.app` → Open.
+            Setup guide: see `aa-macro/README.md` in the repository.
